@@ -1,11 +1,15 @@
 import {showError, showSuccess, showErrorToast, showSuccessToast, showinfo, showInfoHTML} from './sweetalert2.js'
-import {loadSupabase} from './supabase.js'
+import {loadSupabase, loadSupaBseWithAuth} from './supabase.js'
 const client= await loadSupabase();
 let currentOpView = 'deudas'; // 'deudas' | 'pagos'
 let isExpanded = false; // controls whether list shows all items or limited
 
 window.onload = async function() {
-    showSuccessToast('Bienvenido de nuevo!');
+    /*if (!localStorage.getItem('UserID')) {
+        window.location.href = '/index.html';
+    }*/
+   document.getElementById("nombre_usu").textContent = localStorage.getItem('UserName') || 'Usuario';
+    document.getElementById("anio").textContent = new Date().getFullYear();
     await cargarMontoAdeudadoMensual();
     prepararTabsOperaciones();
     await mostrarOperaciones('deudas');

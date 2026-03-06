@@ -9,16 +9,31 @@
 </head>
 <body>
     pantalla de carga
-    <script>
-        window.onload = function(){
-            //poner aca la logica para obtener la sesion mediante supabase.
+    <script type="module">
+        import { loadSupaBseWithAuth } from '../Scripts/supabase.js';
+        const clientesup = await loadSupaBseWithAuth();
+        window.onload = async function(){
             const id_usuario = localStorage.getItem('UserID');
             if (id_usuario) {
                 window.location.href = '/Plantillas/Inicio.html';
             } else {
-                window.location.href = '/Plantillas/inicio_sesion.html';
-            }
 
+                const {data: { session }, error} = await clientesup.auth.getSession();
+
+                if (error) {
+                    alert('Error al obtener la sesión:', error);
+                }
+                else if (session){
+                    alert('Mensaje temporal = Sesión obtenida:', session);
+                    localStorage.setItem('UserID', session.user.id);
+                    localStorage.setItem('UserName', session.user.user_metadata.full_name);
+                    window.location.href = '/Plantillas/Inicio.html';
+                }
+                else {
+                    alert('Mensaje temporal =No hay sesión activa');
+                    window.location.href = '/Plantillas/inicio_sesion.html';
+                }
+            }
         }
     </script>
 </body>

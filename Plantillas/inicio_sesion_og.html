@@ -42,7 +42,7 @@
 
             const hashedPassword = CryptoJS.SHA256(passwordInput).toString();
             if (hashedPassword === adminPassword) {
-                showSuccess('Acceso concedido. Bienvenido, Administrador.');
+                localStorage.setItem('UserName', 'Claudia');
                 localStorage.setItem('UserID','N/A');
                 window.location.href = '/';
             } else {
