@@ -36,6 +36,31 @@ function normalizePhone(phone){
     return digits;
 }
 
+// --- Multi-tenant helper (ID_Negocio) ---
+// Regla:
+// - localStorage.UserID === 'N/A'  => filtrar/guardar ID_Negocio = NULL
+// - caso normal                   => filtrar/guardar ID_Negocio = <UserID>
+function getLocalUserId(){
+    const raw = localStorage.getItem('UserID');
+    if (raw === undefined || raw === null) return null;
+    const v = String(raw).trim();
+    return v ? v : null;
+}
+
+function getIdNegocioForWrite(){
+    const userId = getLocalUserId();
+    if (!userId) return undefined; // sesión ausente
+    if (userId === 'N/A') return null; // caso especial
+    return userId;
+}
+
+function applyIdNegocioFilter(query){
+    const userId = getLocalUserId();
+    if (userId === 'N/A') return query.is('ID_Negocio', null);
+    if (!userId) return query.eq('ID_Negocio', '__MISSING_USERID__');
+    return query.eq('ID_Negocio', userId);
+}
+
 function Regresar(){
     window.location.href = "/Plantillas/Inicio.html";
 }
@@ -80,10 +105,15 @@ async function agregarCliente(){
         }
     });
     if (formValues) {
+        const idNegocio = getIdNegocioForWrite();
+        if (idNegocio === undefined){
+            await showErrorToast('No se encontró el ID de usuario (UserID). Iniciá sesión nuevamente.');
+            return;
+        }
         const { data, error } = await supabase
             .from('Clientes')
             .insert([
-                { Nombre: formValues.nombre, Telefono: formValues.telefono }
+                { Nombre: formValues.nombre, Telefono: formValues.telefono, ID_Negocio: idNegocio }
             ]);
         if (error) {
             await showErrorToast('Error al agregar el cliente: ' + error.message);
@@ -98,9 +128,11 @@ async function verTodosClientes(){
     if (document.getElementById('listaClientes').style.display != 'none'){
         return;
     }
-    const {data, error} = await supabase
-        .from('Clientes')
-        .select('*');
+    const {data, error} = await applyIdNegocioFilter(
+        supabase
+            .from('Clientes')
+            .select('*')
+    );
     if (error){
         showErrorToast('Error al obtener los clientes: ' + error.message);
         return;
@@ -198,10 +230,12 @@ async function borrarCliente(telefono, nombre, cardEl){
     });
     if (!result.isConfirmed) return;
 
-    const { error } = await supabase
+    let del = supabase
         .from('Clientes')
         .delete()
         .eq('Telefono', tel);
+    del = applyIdNegocioFilter(del);
+    const { error } = await del;
     if (error){
         await showErrorToast('Error al borrar cliente: ' + error.message);
         return;
@@ -211,10 +245,12 @@ async function borrarCliente(telefono, nombre, cardEl){
     cerrarDetallesCliente();
 }
 async function calcularMontoTotalPagado(telefono){
-    const {data, error} = await supabase
+    let q = supabase
         .from('Pagos')
         .select('Monto')
         .eq('Telefono_cliente', telefono);
+    q = applyIdNegocioFilter(q);
+    const {data, error} = await q;
     if (error) {
         showErrorToast('Error al obtener los pagos: ' + error.message);
         return 0;
@@ -280,11 +316,12 @@ async function mostrarOperacionesCliente(tipo){
     cont.textContent = 'Cargando...';
     try{
         const tabla = (tipo === 'deudas') ? 'Deudas' : 'Pagos';
-        const { data, error } = await supabase
+        let q = supabase
             .from(tabla)
             .select('*')
-            .eq('Telefono_cliente', currentClienteTelefono)
-            .order('Creado', { ascending: false });
+            .eq('Telefono_cliente', currentClienteTelefono);
+        q = applyIdNegocioFilter(q);
+        const { data, error } = await q.order('Creado', { ascending: false });
         if (error){
             showErrorToast(error.message);
             cont.textContent = 'Error al cargar.';
@@ -441,11 +478,12 @@ async function mostrarDetallesClienteModal(cliente){
 
     async function updateTotals(){
         try{
-            const { data, error } = await supabase
+            let q = supabase
                 .from('Clientes')
                 .select('Deuda_Activa')
-                .eq('Telefono', telefono)
-                .single();
+                .eq('Telefono', telefono);
+            q = applyIdNegocioFilter(q);
+            const { data, error } = await q.single();
             let adeudado = 0;
             if (!error) {
                 adeudado = Number(data?.Deuda_Activa) || 0;
@@ -490,10 +528,12 @@ async function mostrarDetallesClienteModal(cliente){
         const nuevo = parseFloat(nuevoStr);
         if (isNaN(nuevo)) return;
         try {
-            const { error: updErr } = await supabase
+            let upd = supabase
                 .from('Clientes')
                 .update({ Deuda_Activa: nuevo })
                 .eq('Telefono', telefono);
+            upd = applyIdNegocioFilter(upd);
+            const { error: updErr } = await upd;
             if (updErr){
                 await showErrorToast('Error al actualizar deuda: ' + updErr.message);
                 return;
@@ -517,10 +557,11 @@ async function mostrarDetallesClienteModal(cliente){
         listaCont.textContent = 'Cargando...';
         try {
             const tabla = (view === 'deudas') ? 'Deudas' : 'Pagos';
-            const { data, error } = await supabase.from(tabla)
+            let q = supabase.from(tabla)
                 .select('*')
-                .eq('Telefono_cliente', telefono)
-                .order('Creado', { ascending: false });
+                .eq('Telefono_cliente', telefono);
+            q = applyIdNegocioFilter(q);
+            const { data, error } = await q.order('Creado', { ascending: false });
             if (error){
                 listaCont.textContent = 'Error al cargar.';
                 return;
@@ -754,11 +795,13 @@ document.getElementById('buscarClienteInput').addEventListener('input', async (e
     }
     const orFilter = orParts.join(',');
 
-    const { data, error } = await supabase
+    let q = supabase
         .from('Clientes')
         .select('*')
         .or(orFilter)
         .limit(50);
+    q = applyIdNegocioFilter(q);
+    const { data, error } = await q;
     if (error){
         showErrorToast('Error al obtener los clientes: ' + error.message);
         return;
@@ -848,6 +891,7 @@ async function eliminarDeudaIndiv(item, telefono){
             if (fecha !== undefined) matchObj['Creado'] = fecha;
             del = del.match(matchObj);
         }
+        del = applyIdNegocioFilter(del);
         const { error } = await del;
         if (error){ await showErrorToast('No se pudo eliminar la deuda: ' + error.message); return false; }
         return true;
@@ -863,10 +907,12 @@ async function eliminarDeudasCliente(telefono){
     try{
         const tel = normalizePhone(telefono || currentClienteTelefono || '');
         if (!tel){ await showErrorToast('Teléfono inválido'); return false; }
-        const { error } = await supabase
+        let del = supabase
             .from('Deudas')
             .delete()
             .eq('Telefono_cliente', tel);
+        del = applyIdNegocioFilter(del);
+        const { error } = await del;
         if (error){ await showErrorToast('No se pudieron eliminar las deudas: ' + error.message); return false; }
         return true;
     }catch(err){

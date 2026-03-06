@@ -4,6 +4,31 @@ const client= await loadSupabase();
 let currentOpView = 'deudas'; // 'deudas' | 'pagos'
 let isExpanded = false; // controls whether list shows all items or limited
 
+// --- Multi-tenant helper (ID_Negocio) ---
+// Regla:
+// - localStorage.UserID === 'N/A'  => filtrar/guardar ID_Negocio = NULL
+// - caso normal                   => filtrar/guardar ID_Negocio = <UserID>
+function getLocalUserId(){
+    const raw = localStorage.getItem('UserID');
+    if (raw === undefined || raw === null) return null;
+    const v = String(raw).trim();
+    return v ? v : null;
+}
+
+function getIdNegocioForWrite(){
+    const userId = getLocalUserId();
+    if (!userId) return undefined; // sesión ausente
+    if (userId === 'N/A') return null; // caso especial
+    return userId;
+}
+
+function applyIdNegocioFilter(query){
+    const userId = getLocalUserId();
+    if (userId === 'N/A') return query.is('ID_Negocio', null);
+    if (!userId) return query.eq('ID_Negocio', '__MISSING_USERID__');
+    return query.eq('ID_Negocio', userId);
+}
+
 window.onload = async function() {
     /*if (!localStorage.getItem('UserID')) {
         window.location.href = '/index.html';
@@ -38,10 +63,11 @@ window.realizarOperacion = async function(e){
    await openRegistroOperacion();
 }
 async function cargarPagosRecientes(){
-    const { data, error } = await client
-        .from('Pagos')
-        .select('*')
-        .order('Creado', { ascending: false });
+    const { data, error } = await applyIdNegocioFilter(
+        client
+            .from('Pagos')
+            .select('*')
+    ).order('Creado', { ascending: false });
     if (error){
         showErrorToast(error.message);
         return [];
@@ -51,10 +77,11 @@ async function cargarPagosRecientes(){
 }
 
 async function cargarDeudasRecientes(){
-    const { data, error } = await client
-        .from('Deudas')
-        .select('*')
-        .order('Creado', { ascending: false });
+    const { data, error } = await applyIdNegocioFilter(
+        client
+            .from('Deudas')
+            .select('*')
+    ).order('Creado', { ascending: false });
     if (error){
         showErrorToast(error.message);
         return [];
@@ -234,6 +261,13 @@ async function openRegistroOperacion(){
                 Telefono_cliente: phoneValue,
             };
             try{
+                const idNegocio = getIdNegocioForWrite();
+                if (idNegocio === undefined){
+                    window.Swal.showValidationMessage('No se encontró el ID de usuario (UserID). Iniciá sesión nuevamente.');
+                    return null;
+                }
+
+                payload.ID_Negocio = idNegocio;
                 const table = tipo === 'deuda' ? 'Deudas' : 'Pagos';
                 const { data, error } = await client.from(table).insert(payload).select();
                 if (error){
@@ -243,11 +277,12 @@ async function openRegistroOperacion(){
 
                 // Actualizar Deuda_Activa según tipo
                 if (phoneValue) {
-                    const { data: clientData, error: selectError } = await client
+                    let qClient = client
                         .from('Clientes')
                         .select('Deuda_Activa')
-                        .eq('Telefono', phoneValue)
-                        .single();
+                        .eq('Telefono', phoneValue);
+                    qClient = applyIdNegocioFilter(qClient);
+                    const { data: clientData, error: selectError } = await qClient.single();
                     if (selectError) {
                         console.error('Error al obtener deuda actual del cliente', selectError);
                         // No abort registration, but inform user
@@ -259,10 +294,12 @@ async function openRegistroOperacion(){
                     if (tipo === 'deuda'){
                         const added = Number(payload.Monto) || 0;
                         const newDeuda = parseFloat((current + added).toFixed(2));
-                        const { error: updError } = await client
+                        let upd = client
                             .from('Clientes')
                             .update({ Deuda_Activa: newDeuda })
                             .eq('Telefono', phoneValue);
+                        upd = applyIdNegocioFilter(upd);
+                        const { error: updError } = await upd;
                         if (updError){
                             console.error('Error al actualizar deuda del cliente', updError);
                             window.Swal.showValidationMessage('Error al actualizar deuda del cliente: ' + (updError.message || updError));
@@ -271,10 +308,12 @@ async function openRegistroOperacion(){
                     } else if (tipo === 'pago'){
                         const deducted = Number(payload.Monto) || 0;
                         const newDeuda = parseFloat(Math.max(0, current - deducted).toFixed(2));
-                        const { error: updError } = await client
+                        let upd = client
                             .from('Clientes')
                             .update({ Deuda_Activa: newDeuda })
                             .eq('Telefono', phoneValue);
+                        upd = applyIdNegocioFilter(upd);
+                        const { error: updError } = await upd;
                         if (updError){
                             console.error('Error al actualizar deuda del cliente', updError);
                             window.Swal.showValidationMessage('Error al actualizar deuda del cliente: ' + (updError.message || updError));
@@ -303,7 +342,13 @@ async function openRegistroOperacion(){
                 if (!term) return;
                 try{
                     const orQuery = `Nombre.ilike.%${term}%,Telefono.ilike.%${term}%`;
-                    const { data, error } = await client.from('Clientes').select('Nombre, Telefono').or(orQuery).limit(50);
+                    let q = client
+                        .from('Clientes')
+                        .select('Nombre, Telefono')
+                        .or(orQuery)
+                        .limit(50);
+                    q = applyIdNegocioFilter(q);
+                    const { data, error } = await q;
                     if (error) { console.error(error); matches.innerHTML = '<div class="muted">Error de búsqueda</div>'; return; }
                     if (!data || data.length === 0) { matches.innerHTML = '<div class="muted">No hay coincidencias</div>'; return; }
                     
@@ -674,11 +719,12 @@ async function showOperacionDetalle(item, tipo) {
 
 async function obtenerNombreCliente(telefono) {
     if (!telefono) return null;
-    const { data, error } = await client
-      .from('Clientes')
-      .select('Nombre')
-      .eq('Telefono', telefono)
-      .single();
+    let q = client
+        .from('Clientes')
+        .select('Nombre')
+        .eq('Telefono', telefono);
+    q = applyIdNegocioFilter(q);
+    const { data, error } = await q.single();
 
     if (error) {
         showError('Error al obtener el nombre del cliente:', error);
@@ -693,9 +739,11 @@ async function recargarTabla() {
     }
 }
 async function cargarMontoAdeudadoMensual(){
-    const { data, error } = await client
-      .from('Clientes')
-      .select('Deuda_Activa');
+        const { data, error } = await applyIdNegocioFilter(
+                client
+                        .from('Clientes')
+                        .select('Deuda_Activa')
+        );
     if (error) {
       showErrorToast(error.message);
       return 0;
@@ -737,11 +785,13 @@ document.getElementById("deuda_total").addEventListener("click", async function(
         title: 'Desglose de Deuda Total Activa',
         html: 'Cargando...',
         didOpen: async () => {
-            const { data, error } = await client
+            let q = client
                 .from('Clientes')
                 .select('Nombre, Telefono, Deuda_Activa')
                 .gt('Deuda_Activa', 0)
                 .order('Deuda_Activa', { ascending: false });
+            q = applyIdNegocioFilter(q);
+            const { data, error } = await q;
             if (error) {
                 Swal.getHtmlContainer().innerHTML = 'Error al cargar los datos: ' + escapeHtml(error.message);
                 return;
