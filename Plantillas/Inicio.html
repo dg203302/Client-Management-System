@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -12,17 +12,26 @@
         })();
     </script>
     <link rel="stylesheet" href="/Estilos/estilos_inicio.css">
-    <title>Inicio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <title>Dashboard | CMS Premium</title>
 </head>
 <body>
-    <header>
+    <!-- Capas de Glassmorphism (Fondo) -->
+    <div class="ambient-background">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+        <div class="glass-overlay"></div>
+    </div>
+
+    <header class="navbar">
         <div class="header-inner">
             <div class="header-text">
                 <h1>Inicio</h1>
                 <p id="bienvenida"></p>
             </div>
             <div class="header-actions">
-                <a class="icon-btn" href="/Plantillas/administracion_clientes.html" aria-label="Administrar clientes" title="Clientes">
+                <a class="icon-btn" href="/Plantillas/administracion_clientes.html" aria-label="Administrar clientes" title="Directorio de Clientes">
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                         <circle cx="9" cy="7" r="4" />
@@ -30,10 +39,10 @@
                         <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                     </svg>
                 </a>
-                <a href="/Plantillas/Configuracion.html" class="pfp-link" aria-label="Configuración" title="Configuración">
+                <a href="/Plantillas/Configuracion.html" class="pfp-link" aria-label="Configuración" title="Configuración de Cuenta">
                     <img src="" alt="Foto de perfil" id="pfp">
                 </a>
-                <button type="button" class="icon-btn" onclick="cerrarSesion()" aria-label="Cerrar sesión" title="Cerrar sesión">
+                <button type="button" class="icon-btn btn-danger-hover" onclick="cerrarSesion()" aria-label="Cerrar sesión" title="Cerrar sesión">
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                         <polyline points="16 17 21 12 16 7" />
@@ -43,13 +52,14 @@
             </div>
         </div>
     </header>
-    <main>
-        <section id="kpi_adeudado_mes">
+
+    <main class="dashboard-layout">
+        <section id="kpi_adeudado_mes" class="glass-panel">
             <div id="deuda_total">
-                <h2>Deuda Total Activa</h2>
-                <h1 id="total_adeudado_mes">Cargando...</h1>
+                <h2 class="kpi-subtitle">Deuda Total Activa</h2>
+                <h1 id="total_adeudado_mes" class="text-gradient">Cargando...</h1>
             </div>
-            <button type="button" class="icon-btn" onclick="recargarMontos()" aria-label="Recargar montos" title="Recargar">
+            <button type="button" class="icon-btn btn-large" onclick="recargarMontos()" aria-label="Recargar montos" title="Actualizar KPI">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                     <path d="M3 3v5h5" />
@@ -57,43 +67,55 @@
             </button>
         </section>
         
-        <section id="btnes_nav">
-            <a class="nav-card" href="/Plantillas/administracion_clientes.html">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
+        <section id="btnes_nav" class="nav-grid">
+            <a class="nav-card glass-panel interactive-panel" href="/Plantillas/administracion_clientes.html">
+                <div class="nav-icon bg-blue-gradient">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                </div>
                 <div class="nav-card__text">
-                    <span class="nav-card__title">Administrar Clientes</span>
-                    <span class="nav-card__subtitle">Altas, bajas y operaciones</span>
+                    <span class="nav-card__title">Directorio de Clientes</span>
+                    <span class="nav-card__subtitle">Gestión de perfiles y estados</span>
                 </div>
             </a>
-            <button type="button" class="nav-card nav-card--primary" id="btn_realiz_op" onclick="realizarOperacion(event)" aria-expanded="false" aria-controls="Operacion-ingreso">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M8 12h8" />
-                    <path d="M12 8v8" />
-                </svg>
+            <button type="button" class="nav-card nav-card--primary glass-panel interactive-panel pulse-glow" id="btn_realiz_op" onclick="realizarOperacion(event)" aria-expanded="false" aria-controls="Operacion-ingreso">
+                <div class="nav-icon bg-accent-gradient">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M8 12h8" />
+                        <path d="M12 8v8" />
+                    </svg>
+                </div>
                 <div class="nav-card__text">
-                    <span class="nav-card__title">Realizar Operación</span>
-                    <span class="nav-card__subtitle">Registrar pago o deuda</span>
+                    <span class="nav-card__title">Nueva Operación</span>
+                    <span class="nav-card__subtitle">Registrar un pago o deuda</span>
                 </div>
             </button>
         </section>
-        <section id="Operacion-ingreso" hidden>
-            <h2>Registrar Operación</h2>
+
+        <section id="Operacion-ingreso" class="glass-panel" hidden>
+            <h2 class="panel-title">Detalles de Operación</h2>
             <div class="op-reg">
-                <label for="op_clientSearch" style="font-weight:600">Buscar Cliente (nombre o teléfono)</label>
-                <input id="op_clientSearch" placeholder="Escribe nombre o teléfono" autocomplete="off" inputmode="search">
-                <div id="op_clientMatches" class="client-matches" aria-live="polite"></div>
+                
+                <div class="input-wrapper">
+                    <label for="op_clientSearch">Buscar Cliente</label>
+                    <input id="op_clientSearch" class="modern-input" placeholder="Ingresa nombre o teléfono..." autocomplete="off" inputmode="search">
+                    <div id="op_clientMatches" class="client-matches" aria-live="polite"></div>
+                </div>
 
-                <label for="op_category" style="font-weight:600">Detalles</label>
-                <input id="op_category" placeholder="Detalles (p.ej. Servicio, Producto)">
+                <div class="input-wrapper">
+                    <label for="op_category">Concepto o Detalle</label>
+                    <input id="op_category" class="modern-input" placeholder="Ej: Pago de cuota, Servicio...">
+                </div>
 
-                <label for="op_amount" style="font-weight:600">Monto</label>
-                <input id="op_amount" class="reg-amount" value="0" inputmode="decimal">
+                <div class="input-wrapper amount-wrapper">
+                    <label for="op_amount">Monto de Operación ($)</label>
+                    <input id="op_amount" class="modern-input reg-amount" value="0" inputmode="decimal">
+                </div>
 
                 <div id="op_calc" class="calc-grid" aria-label="Calculadora">
                     <button type="button" class="calc-btn" data-key="7">7</button>
@@ -118,37 +140,38 @@
                 </div>
 
                 <div class="reg-actions">
-                    <button type="button" id="op_calc_back" title="Borrar un dígito">⌫</button>
-                    <button type="button" id="op_calc_clear">C</button>
+                    <button type="button" id="op_calc_back" class="btn-clear secondary" title="Borrar un dígito">⌫</button>
+                    <button type="button" id="op_calc_clear" class="btn-clear danger">Limpiar (C)</button>
                 </div>
 
-                <div class="type-row" role="radiogroup" aria-label="Tipo de operación">
+                <div class="type-row glass-tabs" role="radiogroup" aria-label="Tipo de operación">
                     <label class="type-option" for="op_chkPago">
                         <input type="radio" name="op_tipo" id="op_chkPago" value="pago">
-                        Pago
+                        <span>Pago Recibido</span>
                     </label>
                     <label class="type-option" for="op_chkDeuda">
                         <input type="radio" name="op_tipo" id="op_chkDeuda" value="deuda" checked>
-                        Deuda
+                        <span>Cargar Deuda</span>
                     </label>
                 </div>
 
                 <div class="op-submit">
-                    <button type="button" id="op_registrar" class="btn">Registrar Operación</button>
+                    <button type="button" id="op_registrar" class="btn btn-primary large">Registrar Operación</button>
                 </div>
             </div>
         </section>
-        <section id="operaciones_rec">
+
+        <section id="operaciones_rec" class="glass-panel">
             <div class="section-title-row">
-                <h2>Operaciones Recientes</h2>
+                <h2 class="panel-title">Operaciones Recientes</h2>
                 <div class="section-actions" id="botones">
-                    <button type="button" class="icon-btn" onclick="recargarTabla()" aria-label="Refrescar operaciones" title="Refrescar">
+                    <button type="button" class="icon-btn tooltip-btn" onclick="recargarTabla()" aria-label="Refrescar operaciones" title="Refrescar vista">
                         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
                             <path d="M3 3v5h5" />
                         </svg>
                     </button>
-                    <button type="button" class="icon-btn" id="btn_expandir_ops" onclick="expandirTabla()" aria-expanded="false" aria-label="Expandir operaciones" title="Expandir">
+                    <button type="button" class="icon-btn btn-text" id="btn_expandir_ops" onclick="expandirTabla()" aria-expanded="false" aria-label="Expandir operaciones">
                         <svg class="icon icon-rotate" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <polyline points="7 13 12 18 17 13" />
                             <polyline points="7 6 12 11 17 6" />
@@ -157,17 +180,18 @@
                     </button>
                 </div>
             </div>
-            <div class="tabs" role="tablist" aria-label="Filtro de operaciones">
-                <button id="btn_ver_deudas" class="tab active" type="button" role="tab" aria-selected="true">Ver Deudas</button>
-                <button id="btn_ver_pagos" class="tab" type="button" role="tab" aria-selected="false">Ver Pagos</button>
+            
+            <div class="tabs modern-tabs" role="tablist" aria-label="Filtro de operaciones">
+                <button id="btn_ver_deudas" class="tab active" type="button" role="tab" aria-selected="true">Deudas Activas</button>
+                <button id="btn_ver_pagos" class="tab" type="button" role="tab" aria-selected="false">Pagos Recibidos</button>
             </div>
-            <div id="lista_operaciones">
-                Cargando...
+            
+            <div id="lista_operaciones" class="modern-list">
+                <div class="loading-state">Obteniendo historial...</div>
             </div>
         </section>
 
     </main>
-
 
     <script src="/Scripts/script_inicio.js" type="module"></script>
 </body>
