@@ -66,7 +66,7 @@ async function eliminarCuenta(){
 
     if (!result.isConfirmed) return
 
-    await Swal.fire({
+    Swal.fire({
         title: 'Eliminando…',
         text: 'Por favor espera',
         allowOutsideClick: false,

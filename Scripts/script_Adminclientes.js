@@ -9,6 +9,7 @@ let currentClienteNombre = null;
 let currentClienteOpView = 'deudas'; // 'deudas' | 'pagos'
 let isExpandedCliente = false; // controla ver 4 vs todos
 let currentClientesFilter = 'all'; // 'all' | 'withDebt' | 'withoutDebt'
+let isEditingCliente = false;
 
 function setResponsiveDetailsOpen(open){
     if (window.innerWidth <= 1080) {
@@ -37,6 +38,190 @@ function syncEditButtonVisibility(){
     if (btnEditar) btnEditar.style.display = hasSelection ? '' : 'none';
     const btnCerrar = document.getElementById('btn_cerrar_detalles');
     if (btnCerrar) btnCerrar.style.display = hasSelection ? '' : 'none';
+}
+
+function setClienteEditMode(on){
+    isEditingCliente = !!on;
+    const panel = document.getElementById('editarClientePanel');
+    const datos = document.getElementById('datosCliente');
+    const ops = document.getElementById('operacionesCliente');
+    if (panel) panel.hidden = !isEditingCliente;
+    if (datos) datos.style.display = isEditingCliente ? 'none' : '';
+    if (ops) ops.style.display = isEditingCliente ? 'none' : '';
+}
+
+function parseMontoToNumber(input){
+    if (input === undefined || input === null) return 0;
+    const raw = String(input).trim();
+    if (!raw) return 0;
+    // Permitir formatos: "1234", "1.234", "1.234,56", "1234,56"
+    const cleaned = raw.replace(/\s+/g, '').replace(/\$/g, '');
+    const hasComma = cleaned.includes(',');
+    const normalized = hasComma
+        ? cleaned.replace(/\./g, '').replace(',', '.')
+        : cleaned;
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : NaN;
+}
+
+async function abrirEdicionCliente(){
+    if (!currentClienteTelefono){
+        await showErrorToast('No hay cliente seleccionado.');
+        return;
+    }
+
+    const nombreInput = document.getElementById('edit_nombre_inline');
+    const telefonoInput = document.getElementById('edit_telefono_inline');
+    const deudaInput = document.getElementById('edit_deuda_inline');
+    if (!nombreInput || !telefonoInput || !deudaInput){
+        await showErrorToast('No se encontró el formulario de edición.');
+        return;
+    }
+
+    nombreInput.value = (currentClienteNombre || '').toString();
+    telefonoInput.value = normalizePhone(currentClienteTelefono);
+
+    // Cargar deuda actual desde la BD para evitar desfasajes
+    const deudaActual = await calcularMontoTotalAdeudado(currentClienteTelefono);
+    deudaInput.value = String(Number(deudaActual) || 0);
+
+    setClienteEditMode(true);
+    syncEditButtonVisibility();
+    requestAnimationFrame(() => nombreInput.focus());
+}
+
+function cancelarEdicionCliente(){
+    setClienteEditMode(false);
+}
+
+async function guardarEdicionCliente(){
+    if (!currentClienteTelefono){
+        await showErrorToast('No hay cliente seleccionado.');
+        return;
+    }
+
+    const nombreInput = document.getElementById('edit_nombre_inline');
+    const telefonoInput = document.getElementById('edit_telefono_inline');
+    const deudaInput = document.getElementById('edit_deuda_inline');
+    if (!nombreInput || !telefonoInput || !deudaInput){
+        await showErrorToast('No se encontró el formulario de edición.');
+        return;
+    }
+
+    const oldNombre = (currentClienteNombre || '').toString();
+    const oldTelefono = normalizePhone(currentClienteTelefono);
+
+    const newNombre = (nombreInput.value || '').trim();
+    const newTelefono = normalizePhone((telefonoInput.value || '').trim());
+    const deudaParsed = parseMontoToNumber(deudaInput.value);
+
+    if (!newNombre){
+        await showErrorToast('Ingrese el nombre del cliente.');
+        nombreInput.focus();
+        return;
+    }
+    if (!newTelefono){
+        await showErrorToast('Ingrese el teléfono del cliente (solo números).');
+        telefonoInput.focus();
+        return;
+    }
+    if (!Number.isFinite(deudaParsed) || deudaParsed < 0){
+        await showErrorToast('La deuda activa debe ser un número válido (>= 0).');
+        deudaInput.focus();
+        return;
+    }
+
+    const changedNombre = newNombre !== oldNombre;
+    const changedTelefono = newTelefono !== oldTelefono;
+
+    // Leer deuda vieja para detectar cambio real
+    const oldDeuda = await calcularMontoTotalAdeudado(oldTelefono);
+    const changedDeuda = Number(deudaParsed) !== Number(oldDeuda || 0);
+
+    if (!changedNombre && !changedTelefono && !changedDeuda){
+        await showinfo('Sin cambios', 'No se modificó ningún dato.');
+        return;
+    }
+
+    if (changedTelefono){
+        const confirm = await Swal.fire({
+            title: 'Confirmar cambio de teléfono',
+            text: 'Esto actualizará también las deudas y pagos del cliente.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Continuar',
+            cancelButtonText: 'Cancelar'
+        });
+        if (!confirm.isConfirmed) return;
+    }
+
+    try {
+        let upd = supabase
+            .from('Clientes')
+            .update({ Nombre: newNombre, Telefono: newTelefono, Deuda_Activa: Number(deudaParsed) || 0 })
+            .eq('Telefono', oldTelefono);
+        upd = applyIdNegocioFilter(upd);
+        const { error: errCliente } = await upd;
+        if (errCliente){
+            await showErrorToast('No se pudo actualizar el cliente: ' + errCliente.message);
+            return;
+        }
+
+        if (changedTelefono){
+            let updDeudas = supabase
+                .from('Deudas')
+                .update({ Telefono_cliente: newTelefono })
+                .eq('Telefono_cliente', oldTelefono);
+            updDeudas = applyIdNegocioFilter(updDeudas);
+            const { error: errDeudas } = await updDeudas;
+
+            let updPagos = supabase
+                .from('Pagos')
+                .update({ Telefono_cliente: newTelefono })
+                .eq('Telefono_cliente', oldTelefono);
+            updPagos = applyIdNegocioFilter(updPagos);
+            const { error: errPagos } = await updPagos;
+
+            if (errDeudas || errPagos){
+                // Best-effort rollback del cliente
+                let rb = supabase
+                    .from('Clientes')
+                    .update({ Nombre: oldNombre, Telefono: oldTelefono, Deuda_Activa: Number(oldDeuda) || 0 })
+                    .eq('Telefono', newTelefono);
+                rb = applyIdNegocioFilter(rb);
+                await rb;
+                const msg = (errDeudas ? `Deudas: ${errDeudas.message}` : '') + (errPagos ? ` Pagos: ${errPagos.message}` : '');
+                await showErrorToast('Se actualizó el cliente, pero falló la actualización de operaciones. Se revirtió el cambio. ' + msg);
+                return;
+            }
+        }
+
+        // Actualizar estado/UI
+        currentClienteNombre = newNombre;
+        currentClienteTelefono = newTelefono;
+        const elNombre = document.getElementById('nombreCliente');
+        const elTelefono = document.getElementById('telefonoCliente');
+        const avatar = document.getElementById('avatarCliente');
+        if (elNombre) elNombre.innerHTML = `Nombre: <br>${newNombre}`;
+        if (elTelefono) elTelefono.innerHTML = `Teléfono: <br>${newTelefono}`;
+        if (avatar) avatar.textContent = getAvatarLetters(newNombre);
+
+        // Actualizar deuda visible en tarjetas
+        const formatter = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+        const elAdeudado = document.getElementById('montototalAdeudado');
+        if (elAdeudado) elAdeudado.textContent = formatter.format(Number(deudaParsed) || 0);
+
+        await showSuccessToast('Cliente actualizado');
+
+        // Refrescar lista y re-seleccionar
+        await verTodosClientes();
+        requestAnimationFrame(() => autoSelectClientByPhone(newTelefono));
+
+        setClienteEditMode(false);
+    } catch (err){
+        console.error('Guardar edición cliente error', err);
+        await showErrorToast('Error al editar el cliente');
+    }
 }
 
 function renderClientesEnContenedor(clientes){
@@ -102,141 +287,7 @@ function autoSelectClientByPhone(phone){
 }
 
 async function editarClienteActual(){
-    if (!currentClienteTelefono){
-        await showErrorToast('No hay cliente seleccionado.');
-        return;
-    }
-
-    const oldNombre = (currentClienteNombre || '').toString();
-    const oldTelefono = normalizePhone(currentClienteTelefono);
-
-    const html = `
-    <div style="display:grid; gap:8px; width:100%; max-width:100%; box-sizing:border-box; overflow:hidden;">
-        <label class="muted" for="edit_nombre">Nombre completo</label>
-        <input class="swal2-input" type="text" id="edit_nombre" name="edit_nombre" required style="width:100%; max-width:100%; box-sizing:border-box;" value="${escapeHtml(oldNombre)}">
-
-        <label class="muted" for="edit_telefono">Teléfono</label>
-        <input class="swal2-input" type="tel" id="edit_telefono" name="edit_telefono" required style="width:100%; max-width:100%; box-sizing:border-box;" value="${escapeHtml(oldTelefono)}">
-
-        <p class="muted" style="margin:6px 0 0 0; font-size:0.78rem;">
-            Si cambiás el teléfono, también se actualizarán deudas y pagos asociados.
-        </p>
-    </div>`;
-
-    const { value: formValues } = await Swal.fire({
-        title: 'Editar cliente',
-        html,
-        width: 'min(560px, 92vw)',
-        showCancelButton: true,
-        confirmButtonText: 'Guardar',
-        cancelButtonText: 'Cancelar',
-        focusConfirm: false,
-        allowEnterKey: true,
-        didOpen: () => {
-            const input = Swal.getPopup().querySelector('#edit_nombre');
-            if (input) input.focus();
-        },
-        preConfirm: () => {
-            const nombre = (Swal.getPopup().querySelector('#edit_nombre').value || '').trim();
-            const telRaw = (Swal.getPopup().querySelector('#edit_telefono').value || '').trim();
-            const telefono = normalizePhone(telRaw);
-            if (!nombre) {
-                Swal.showValidationMessage('Ingrese el nombre del cliente');
-                return;
-            }
-            if (!telefono) {
-                Swal.showValidationMessage('Ingrese el teléfono del cliente (solo números)');
-                return;
-            }
-            return { nombre, telefono };
-        }
-    });
-
-    if (!formValues) return;
-
-    const newNombre = formValues.nombre;
-    const newTelefono = normalizePhone(formValues.telefono);
-
-    const changedNombre = newNombre !== oldNombre;
-    const changedTelefono = newTelefono !== oldTelefono;
-    if (!changedNombre && !changedTelefono){
-        await showinfo('Sin cambios', 'No se modificó ningún dato.');
-        return;
-    }
-
-    if (changedTelefono){
-        const confirm = await Swal.fire({
-            title: 'Confirmar cambio de teléfono',
-            text: 'Esto actualizará también las deudas y pagos del cliente.',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'Continuar',
-            cancelButtonText: 'Cancelar'
-        });
-        if (!confirm.isConfirmed) return;
-    }
-
-    // Actualizar en BD (multi-tenant)
-    try {
-        let upd = supabase
-            .from('Clientes')
-            .update({ Nombre: newNombre, Telefono: newTelefono })
-            .eq('Telefono', oldTelefono);
-        upd = applyIdNegocioFilter(upd);
-        const { error: errCliente } = await upd;
-        if (errCliente){
-            await showErrorToast('No se pudo actualizar el cliente: ' + errCliente.message);
-            return;
-        }
-
-        if (changedTelefono){
-            let updDeudas = supabase
-                .from('Deudas')
-                .update({ Telefono_cliente: newTelefono })
-                .eq('Telefono_cliente', oldTelefono);
-            updDeudas = applyIdNegocioFilter(updDeudas);
-            const { error: errDeudas } = await updDeudas;
-
-            let updPagos = supabase
-                .from('Pagos')
-                .update({ Telefono_cliente: newTelefono })
-                .eq('Telefono_cliente', oldTelefono);
-            updPagos = applyIdNegocioFilter(updPagos);
-            const { error: errPagos } = await updPagos;
-
-            if (errDeudas || errPagos){
-                // Best-effort rollback del cliente
-                let rb = supabase
-                    .from('Clientes')
-                    .update({ Nombre: oldNombre, Telefono: oldTelefono })
-                    .eq('Telefono', newTelefono);
-                rb = applyIdNegocioFilter(rb);
-                await rb;
-                const msg = (errDeudas ? `Deudas: ${errDeudas.message}` : '') + (errPagos ? ` Pagos: ${errPagos.message}` : '');
-                await showErrorToast('Se actualizó el cliente, pero falló la actualización de operaciones. Se revirtió el cambio. ' + msg);
-                return;
-            }
-        }
-
-        // Actualizar estado/UI
-        currentClienteNombre = newNombre;
-        currentClienteTelefono = newTelefono;
-        const elNombre = document.getElementById('nombreCliente');
-        const elTelefono = document.getElementById('telefonoCliente');
-        const avatar = document.getElementById('avatarCliente');
-        if (elNombre) elNombre.innerHTML = `Nombre: <br>${newNombre}`;
-        if (elTelefono) elTelefono.innerHTML = `Teléfono: <br>${newTelefono}`;
-        if (avatar) avatar.textContent = getAvatarLetters(newNombre);
-
-        await showSuccessToast('Cliente actualizado');
-
-        // Refrescar lista y re-seleccionar
-        await verTodosClientes();
-        requestAnimationFrame(() => autoSelectClientByPhone(newTelefono));
-    } catch (err){
-        console.error('Editar cliente error', err);
-        await showErrorToast('Error al editar el cliente');
-    }
+    await abrirEdicionCliente();
 }
 
 // --- Multi-tenant helper (ID_Negocio) ---
@@ -426,10 +477,12 @@ function insertarClienteEnLista(cliente, contenedor){
                 <div style="font-weight:600; color:var(--heading)">${escapeHtml(nombre)}</div>
                 <div class="meta" style="font-size:0.9rem">${escapeHtml(telefono)}</div>
             </div>
-            <button class="botonBorrar" type="button">Borrar</button>
         </div>
     `;
     card.addEventListener('click', async () => {
+        // Si estaba en modo edición, volver al modo detalle al seleccionar otro cliente
+        if (isEditingCliente) setClienteEditMode(false);
+
         document.querySelectorAll('.client-item[aria-selected="true"]').forEach((el) => el.removeAttribute('aria-selected'));
         card.setAttribute('aria-selected', 'true');
         setResponsiveDetailsOpen(true);
@@ -460,16 +513,16 @@ function insertarClienteEnLista(cliente, contenedor){
         await mostrarOperacionesCliente('deudas');
     });
 
-    // Borrar cliente (evitar que dispare el click del card)
-    const btnBorrar = card.querySelector('.botonBorrar');
-    if (btnBorrar){
-        btnBorrar.addEventListener('click', async (ev) => {
-            ev.stopPropagation();
-            await borrarCliente(telefono, nombre, card);
-        });
-    }
-
     contenedor.appendChild(card);
+}
+
+async function borrarClienteActual(){
+    if (!currentClienteTelefono){
+        await showErrorToast('No hay cliente seleccionado.');
+        return;
+    }
+    const selectedCard = document.querySelector('.client-item[aria-selected="true"]');
+    await borrarCliente(currentClienteTelefono, currentClienteNombre || '', selectedCard);
 }
 async function borrarCliente(telefono, nombre, cardEl){
     const tel = normalizePhone(telefono);
@@ -1225,6 +1278,12 @@ async function refrescarOperacionesCliente(){
 
 // Cerrar contenedor de detalles del cliente
 function cerrarDetallesCliente(){
+    // Si estamos editando, el botón de cerrar debe cerrar SOLO la edición
+    // (volver a la vista de detalle) sin perder el cliente seleccionado.
+    if (isEditingCliente){
+        setClienteEditMode(false);
+        return;
+    }
     setResponsiveDetailsOpen(false);
     const cont = document.getElementById('lista_operaciones_cliente');
     if (cont) cont.innerHTML = 'Selecciona un cliente para ver sus operaciones.';
@@ -1241,6 +1300,7 @@ function cerrarDetallesCliente(){
     document.querySelectorAll('.client-item[aria-selected="true"]').forEach((el) => el.removeAttribute('aria-selected'));
     currentClienteTelefono = null;
     currentClienteNombre = null;
+    setClienteEditMode(false);
     syncDesktopNoClientSelected();
     syncEditButtonVisibility();
 }
@@ -1258,6 +1318,21 @@ window.addEventListener('resize', () => {
 const btnEditarCliente = document.getElementById('btn_editar_cliente');
 if (btnEditarCliente){
     btnEditarCliente.addEventListener('click', editarClienteActual);
+}
+
+const btnBorrarCliente = document.getElementById('btn_borrar_cliente');
+if (btnBorrarCliente){
+    btnBorrarCliente.addEventListener('click', borrarClienteActual);
+}
+
+const btnGuardarCliente = document.getElementById('btn_guardar_cliente');
+if (btnGuardarCliente){
+    btnGuardarCliente.addEventListener('click', guardarEdicionCliente);
+}
+
+const btnCancelarEdicion = document.getElementById('btn_cancelar_edicion');
+if (btnCancelarEdicion){
+    btnCancelarEdicion.addEventListener('click', cancelarEdicionCliente);
 }
 
 document.getElementById('buscarClienteInput').addEventListener('input', async (e) => {

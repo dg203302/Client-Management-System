@@ -131,6 +131,37 @@
                 </div>
             </section>
 
+            <section id="editarClientePanel" class="glass-panel edit-panel" hidden>
+                <div class="section-heading-row">
+                    <h2 class="section-title">Editar cliente</h2>
+                    <p class="section-subtitle">Modifica la información del cliente seleccionado.</p>
+                </div>
+
+                <div class="edit-grid" role="form" aria-label="Formulario editar cliente">
+                    <label class="edit-field">
+                        <span class="edit-label">Nombre completo</span>
+                        <input id="edit_nombre_inline" type="text" autocomplete="name" placeholder="Nombre y apellido">
+                    </label>
+
+                    <label class="edit-field">
+                        <span class="edit-label">Teléfono</span>
+                        <input id="edit_telefono_inline" type="tel" inputmode="numeric" autocomplete="tel" placeholder="Solo números">
+                    </label>
+
+                    <label class="edit-field">
+                        <span class="edit-label">Deuda activa</span>
+                        <input id="edit_deuda_inline" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+                        <span class="muted">Se guardará como Deuda Activa del cliente.</span>
+                    </label>
+                </div>
+
+                <div class="action-group edit-actions" aria-label="Acciones edición">
+                    <button id="btn_guardar_cliente" class="btn btn-primary" type="button">Guardar</button>
+                    <button id="btn_cancelar_edicion" class="btn btn-outline subtle" type="button">Cancelar</button>
+                    <button id="btn_borrar_cliente" class="btn btn-danger-soft" type="button">Borrar</button>
+                </div>
+            </section>
+
             <section id="operacionesCliente">
                 <div class="section-header">
                     <div class="tabs" role="tablist" aria-label="Tipo de operación">

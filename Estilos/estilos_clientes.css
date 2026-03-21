@@ -936,6 +936,58 @@ body.op-detail-open .op-detail-drawer {
   padding: 14px;
 }
 
+/* =====================
+   Panel Edición Cliente (inline)
+   ===================== */
+#editarClientePanel {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--glass-soft);
+  padding: 14px;
+}
+
+.edit-grid {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.edit-field {
+  display: grid;
+  gap: 6px;
+}
+
+.edit-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.edit-field input {
+  width: 100%;
+  min-height: 46px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 86%, transparent);
+  color: var(--text);
+  padding: 10px 12px;
+  outline: none;
+}
+
+.edit-field input::placeholder {
+  color: color-mix(in srgb, var(--muted) 86%, transparent);
+}
+
+.edit-field input:focus-visible {
+  box-shadow: 0 0 0 3px var(--ring);
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.edit-actions {
+  margin-top: 12px;
+}
+
 .cliente-profile {
   display: grid;
   grid-template-columns: auto 1fr auto;

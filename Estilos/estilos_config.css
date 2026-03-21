@@ -375,14 +375,31 @@ img {
 
 /* SweetAlert2 (coherente y compatible con ambos temas) */
 .swal2-popup {
-	background: var(--bg-elev) !important;
+	/* En Config V2, --bg-elev es muy transparente; subimos opacidad */
+	background: rgba(var(--bg-rgb), 0.88) !important;
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
 	color: var(--text) !important;
-	border: 1px solid var(--border);
+	border: 1px solid var(--border) !important;
 	border-radius: 16px;
+	box-shadow: var(--glass-shadow);
 }
 
 .swal2-title { color: var(--heading) !important; }
 .swal2-html-container { color: var(--text) !important; }
+
+.swal2-input,
+.swal2-textarea {
+	background: rgba(var(--bg-rgb), 0.72) !important;
+	color: var(--text) !important;
+	border: 1px solid var(--border) !important;
+	border-radius: 14px !important;
+}
+
+.swal2-input::placeholder,
+.swal2-textarea::placeholder {
+	color: color-mix(in srgb, var(--muted) 88%, transparent) !important;
+}
 
 .swal2-confirm {
 	background: var(--primary) !important;
