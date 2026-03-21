@@ -1,6 +1,13 @@
 /* Fuente (solo para el botón) */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+button,
+a,
+label,
+input {
+	-webkit-tap-highlight-color: transparent;
+}
+
 /* Botón de inicio de sesión con Google */
 .btn-google {
 	appearance: none;

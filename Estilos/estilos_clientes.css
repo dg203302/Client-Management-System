@@ -120,6 +120,13 @@ input {
   font: inherit;
 }
 
+button,
+a,
+label,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

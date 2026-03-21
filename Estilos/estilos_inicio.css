@@ -84,6 +84,13 @@
     padding: 0;
 }
 
+button,
+a,
+label,
+input {
+	-webkit-tap-highlight-color: transparent;
+}
+
 html, body { 
     height: 100%;
 }
