@@ -35,7 +35,8 @@ window.onload = async function() {
         window.location.href = '/index.html';
     }*/
     document.getElementById("bienvenida").textContent = textoB();
-    document.getElementById("pfp").src = localStorage.getItem("UserPhoto");
+    const pfp = document.getElementById("pfp");
+    if (pfp) pfp.src = localStorage.getItem("UserPhoto") || '';
     await cargarMontoAdeudadoMensual();
     prepararOperacionIngreso();
     prepararTabsOperaciones();
