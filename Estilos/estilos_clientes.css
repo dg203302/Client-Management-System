@@ -578,6 +578,232 @@ body.op-detail-open .op-detail-drawer {
   transform: translateX(-50%) translateY(0);
 }
 
+/* =====================
+   Bottom-sheet registrar cliente
+   (estética similar al panel de detalle de cliente)
+   ===================== */
+.add-client-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, visibility 0.18s ease;
+  z-index: 160;
+}
+
+.add-client-sheet {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%) translateY(14px);
+  bottom: calc(var(--footer-h) + 16px + env(safe-area-inset-bottom, 0px));
+  width: calc(100vw - 14px);
+  max-width: 560px;
+  max-height: min(78dvh, 720px);
+  overflow: auto;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--glass) 92%, transparent);
+  box-shadow: 0 -24px 44px -22px rgba(0, 0, 0, 0.78);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+  z-index: 170;
+}
+
+body.add-client-open .add-client-backdrop {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+body.add-client-open .add-client-sheet {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.add-client-sheet__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--glass-soft) 92%, transparent);
+  border-radius: 12px;
+  padding: 6px;
+}
+
+.add-client-validation {
+  margin: 2px 2px 0;
+  font-size: 0.86rem;
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
+/* =====================
+   Bottom-sheet confirmación (borrados)
+   ===================== */
+.confirm-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, visibility 0.18s ease;
+  z-index: 1000;
+}
+
+.confirm-sheet {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%) translateY(14px);
+  bottom: calc(var(--footer-h) + 16px + env(safe-area-inset-bottom, 0px));
+  width: calc(100vw - 14px);
+  max-width: 560px;
+  max-height: min(70dvh, 560px);
+  overflow: auto;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--glass) 92%, transparent);
+  box-shadow: 0 -24px 44px -22px rgba(0, 0, 0, 0.78);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+  z-index: 1010;
+}
+
+body.confirm-sheet-open .confirm-sheet-backdrop {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+body.confirm-sheet-open .confirm-sheet {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.confirm-sheet__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--glass-soft) 92%, transparent);
+  border-radius: 12px;
+  padding: 6px;
+}
+
+.confirm-sheet__body {
+  padding: 12px 14px 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.confirm-sheet__actions {
+  justify-content: flex-end;
+}
+
+/* =====================
+
+.confirm-sheet__extra{
+  padding: 0 16px 10px;
+}
+
+.confirm-sheet__option{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+}
+
+.confirm-sheet__option input[type="checkbox"]{
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: currentColor;
+}
+
+.confirm-sheet__option span{
+  display:block;
+  line-height: 1.25;
+}
+   Bottom-sheet prompt (input)
+   ===================== */
+.prompt-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, visibility 0.18s ease;
+  z-index: 1020;
+}
+
+.prompt-sheet {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%) translateY(14px);
+  bottom: calc(var(--footer-h) + 16px + env(safe-area-inset-bottom, 0px));
+  width: calc(100vw - 14px);
+  max-width: 560px;
+  max-height: min(70dvh, 560px);
+  overflow: auto;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--glass) 92%, transparent);
+  box-shadow: 0 -24px 44px -22px rgba(0, 0, 0, 0.78);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+  z-index: 1030;
+}
+
+body.prompt-sheet-open .prompt-sheet-backdrop {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+body.prompt-sheet-open .prompt-sheet {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.prompt-sheet__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: color-mix(in srgb, var(--glass-soft) 92%, transparent);
+  border-radius: 12px;
+  padding: 6px;
+}
+
+.prompt-sheet-validation {
+  margin: 2px 2px 0;
+  font-size: 0.86rem;
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
 .op-detail-drawer__header {
   display: flex;
   align-items: flex-start;

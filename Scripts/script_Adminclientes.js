@@ -144,15 +144,14 @@ async function guardarEdicionCliente(){
     }
 
     if (changedTelefono){
-        const confirm = await Swal.fire({
+        const okConfirm = await openConfirmSheet({
             title: 'Confirmar cambio de teléfono',
-            text: 'Esto actualizará también las deudas y pagos del cliente.',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'Continuar',
-            cancelButtonText: 'Cancelar'
+            subtitle: 'Esto afectará los registros asociados.',
+            messageHtml: 'Esto actualizará también las <strong>deudas</strong> y <strong>pagos</strong> del cliente.',
+            confirmText: 'Continuar',
+            cancelText: 'Cancelar'
         });
-        if (!confirm.isConfirmed) return;
+        if (!okConfirm) return;
     }
 
     try {
@@ -320,44 +319,702 @@ function Regresar(){
 }
 window.Regresar = Regresar;
 
-async function agregarCliente(){
-        const html = `
-        <div style="display:grid; gap:8px; width:100%; max-width:100%; box-sizing:border-box; overflow:hidden;">
-            <label class="muted" for="nombre">Nombre completo</label>
-            <input class="swal2-input" type="text" id="nombre" name="nombre" placeholder="Ej: Juan Pérez" required style="width:100%; max-width:100%; box-sizing:border-box;">
+let addClientSheetState = null;
+let confirmSheetState = null;
+let promptSheetState = null;
 
-            <label class="muted" for="telefono">Teléfono</label>
-            <input class="swal2-input" type="tel" id="telefono" name="telefono" placeholder="264 400 9000" inputmode="tel" required style="width:100%; max-width:100%; box-sizing:border-box;">
-        </div>`;
+async function ajustarDeudaActivaCliente(telefono, delta){
+    const tel = normalizePhone(telefono);
+    if (!tel) return false;
+    try{
+        const actual = await calcularMontoTotalAdeudado(tel);
+        const next = Math.max(0, (Number(actual) || 0) + (Number(delta) || 0));
+        let upd = supabase
+            .from('Clientes')
+            .update({ Deuda_Activa: next })
+            .eq('Telefono', tel);
+        upd = applyIdNegocioFilter(upd);
+        const { error } = await upd;
+        if (error){
+            await showErrorToast('No se pudo actualizar la Deuda Activa: ' + error.message);
+            return false;
+        }
+        return true;
+    }catch(e){
+        console.error('ajustarDeudaActivaCliente error', e);
+        await showErrorToast('Error actualizando la Deuda Activa');
+        return false;
+    }
+}
 
-    const { value: formValues } = await Swal.fire({
-        title: 'Registrar cliente',
-        html: html,
-        width: 'min(520px, 92vw)',
-        showCancelButton: true,
-        confirmButtonText: 'Registrar',
-        cancelButtonText: 'Cancelar',
-        focusConfirm: false,
-        allowEnterKey: true,
-        didOpen: () => {
-            const input = Swal.getPopup().querySelector('#nombre');
-            if (input) input.focus();
-        },
-        preConfirm: () => {
-            const nombre = Swal.getPopup().querySelector('#nombre').value.trim();
-            const telefonoRaw = Swal.getPopup().querySelector('#telefono').value.trim();
-            const telefono = normalizePhone(telefonoRaw);
-            if (!nombre) {
-                Swal.showValidationMessage('Ingrese el nombre del cliente');
-                return;
+function ensureAddClientSheet(){
+    if (addClientSheetState?.sheet && addClientSheetState?.backdrop) return addClientSheetState;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'add-client-backdrop';
+    backdrop.style.display = 'none';
+
+    const sheet = document.createElement('section');
+    sheet.className = 'glass-panel details-panel add-client-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label', 'Registrar cliente');
+    sheet.style.display = 'none';
+
+    sheet.innerHTML = `
+        <div class="add-client-sheet__header">
+            <div>
+                <h2 class="section-title">Registrar cliente</h2>
+                <p class="section-subtitle">Completá los datos del nuevo cliente.</p>
+            </div>
+            <button type="button" class="icon-btn" data-close aria-label="Cerrar" title="Cerrar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="edit-grid" role="form" aria-label="Formulario registrar cliente">
+            <div class="edit-field">
+                <span class="edit-label">Nombre completo</span>
+                <input id="addClientNombre" type="text" placeholder="Ej: Juan Pérez" autocomplete="name" />
+            </div>
+
+            <div class="edit-field">
+                <span class="edit-label">Teléfono</span>
+                <input id="addClientTelefono" type="tel" placeholder="264 400 9000" inputmode="tel" autocomplete="tel" />
+            </div>
+
+            <p class="add-client-validation" role="alert" aria-live="polite" hidden></p>
+
+            <div class="action-group edit-actions">
+                <button class="btn btn-primary" type="button" data-submit>Registrar</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(sheet);
+
+    const nombreInput = sheet.querySelector('#addClientNombre');
+    const telefonoInput = sheet.querySelector('#addClientTelefono');
+    const validation = sheet.querySelector('.add-client-validation');
+    const btnSubmit = sheet.querySelector('[data-submit]');
+    const btnClose = sheet.querySelector('[data-close]');
+
+    addClientSheetState = {
+        backdrop,
+        sheet,
+        nombreInput,
+        telefonoInput,
+        validation,
+        btnSubmit,
+        btnClose,
+        sessionSeq: 0,
+        activeSession: 0,
+        transitionSeq: 0,
+        resolve: null
+    };
+
+    function requestClose(result){
+        const r = addClientSheetState?.resolve;
+        if (typeof r === 'function'){
+            addClientSheetState.resolve = null;
+            r(result);
+        }
+        closeAddClientSheet();
+    }
+
+    function showValidation(message){
+        if (!validation) return;
+        const msg = (message || '').toString().trim();
+        if (!msg){
+            validation.hidden = true;
+            validation.textContent = '';
+            return;
+        }
+        validation.textContent = msg;
+        validation.hidden = false;
+    }
+
+    function submit(){
+        const nombre = (nombreInput?.value || '').trim();
+        const telefonoRaw = (telefonoInput?.value || '').trim();
+        const telefono = normalizePhone(telefonoRaw);
+
+        if (!nombre){
+            showValidation('Ingrese el nombre del cliente.');
+            nombreInput?.focus();
+            return;
+        }
+
+        if (!telefono){
+            showValidation('Ingrese el teléfono del cliente (solo números).');
+            telefonoInput?.focus();
+            return;
+        }
+
+        showValidation('');
+        requestClose({ nombre, telefono });
+    }
+
+    backdrop.addEventListener('click', () => requestClose(null));
+    btnClose?.addEventListener('click', () => requestClose(null));
+    btnSubmit?.addEventListener('click', submit);
+
+    sheet.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape'){
+            e.preventDefault();
+            requestClose(null);
+            return;
+        }
+        if (e.key === 'Enter'){
+            const tag = (e.target?.tagName || '').toLowerCase();
+            if (tag === 'input'){
+                e.preventDefault();
+                submit();
             }
-            if (!telefono) {
-                Swal.showValidationMessage('Ingrese el teléfono del cliente (solo números)');
-                return;
-            }
-            return { nombre, telefono };
         }
     });
+
+    document.addEventListener('keydown', (e) => {
+        if (!document.body.classList.contains('add-client-open')) return;
+        if (e.key === 'Escape'){
+            e.preventDefault();
+            requestClose(null);
+        }
+    });
+
+    return addClientSheetState;
+}
+
+function openAddClientSheet(){
+    const state = ensureAddClientSheet();
+    if (!state) return Promise.resolve(null);
+
+    // Cerrar otros overlays que puedan superponerse
+    document.body.classList.remove('mobile-details-open');
+    document.body.classList.remove('op-detail-open');
+
+    state.sessionSeq += 1;
+    const sessionId = state.sessionSeq;
+    state.activeSession = sessionId;
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'flex';
+
+    // Forzar reflow para que la transición se aplique correctamente
+    void state.sheet.getBoundingClientRect();
+
+    document.body.classList.add('add-client-open');
+
+    if (state.nombreInput) state.nombreInput.value = '';
+    if (state.telefonoInput) state.telefonoInput.value = '';
+    if (state.validation){
+        state.validation.hidden = true;
+        state.validation.textContent = '';
+    }
+
+    requestAnimationFrame(() => state.nombreInput?.focus());
+
+    return new Promise((resolve) => {
+        state.resolve = (result) => {
+            // Evitar resolver si otra apertura tomó el control
+            if (state.activeSession !== sessionId) return;
+            state.activeSession = 0;
+            resolve(result);
+        };
+    });
+}
+
+function closeAddClientSheet(){
+    const state = addClientSheetState;
+    if (!state?.sheet || !state?.backdrop) return;
+
+    const sheet = state.sheet;
+    const backdrop = state.backdrop;
+    state.transitionSeq += 1;
+    const closeId = state.transitionSeq;
+
+    document.body.classList.remove('add-client-open');
+
+    const finalize = () => {
+        if (!addClientSheetState || addClientSheetState.transitionSeq !== closeId) return;
+        sheet.style.display = 'none';
+        backdrop.style.display = 'none';
+    };
+
+    let done = false;
+    const onEnd = (e) => {
+        if (done) return;
+        if (e.target !== sheet) return;
+        if (e.propertyName && e.propertyName !== 'transform' && e.propertyName !== 'opacity') return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    };
+
+    sheet.addEventListener('transitionend', onEnd);
+    window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    }, 420);
+}
+
+function ensureConfirmSheet(){
+    if (confirmSheetState?.sheet && confirmSheetState?.backdrop) return confirmSheetState;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'confirm-sheet-backdrop';
+    backdrop.style.display = 'none';
+
+    const sheet = document.createElement('section');
+    sheet.className = 'glass-panel details-panel confirm-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label', 'Confirmación');
+    sheet.style.display = 'none';
+
+    sheet.innerHTML = `
+        <div class="confirm-sheet__header">
+            <div>
+                <h2 class="section-title" data-title>Confirmar</h2>
+                <p class="section-subtitle" data-subtitle>Revisá antes de continuar.</p>
+            </div>
+            <button type="button" class="icon-btn" data-close aria-label="Cerrar" title="Cerrar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="confirm-sheet__body">
+            <div class="confirm-sheet__message muted" data-message></div>
+            <div class="confirm-sheet__extra" data-extra></div>
+            <div class="action-group confirm-sheet__actions">
+                <button class="btn btn-outline subtle" type="button" data-cancel>Cancelar</button>
+                <button class="btn btn-danger-soft" type="button" data-confirm>Eliminar</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(sheet);
+
+    const titleEl = sheet.querySelector('[data-title]');
+    const subtitleEl = sheet.querySelector('[data-subtitle]');
+    const messageEl = sheet.querySelector('[data-message]');
+    const extraEl = sheet.querySelector('[data-extra]');
+    const btnConfirm = sheet.querySelector('[data-confirm]');
+    const btnCancel = sheet.querySelector('[data-cancel]');
+    const btnClose = sheet.querySelector('[data-close]');
+
+    confirmSheetState = {
+        backdrop,
+        sheet,
+        titleEl,
+        subtitleEl,
+        messageEl,
+        extraEl,
+        btnConfirm,
+        btnCancel,
+        btnClose,
+        sessionSeq: 0,
+        activeSession: 0,
+        transitionSeq: 0,
+        resolve: null,
+        payload: null,
+        cleanup: null
+    };
+
+    function requestClose(result){
+        if (typeof confirmSheetState?.cleanup === 'function'){
+            try{ confirmSheetState.cleanup(); }catch{ /* ignore */ }
+        }
+        confirmSheetState.cleanup = null;
+        const r = confirmSheetState?.resolve;
+        if (typeof r === 'function'){
+            confirmSheetState.resolve = null;
+            r(result);
+        }
+        closeConfirmSheet();
+    }
+
+    backdrop.addEventListener('click', () => requestClose(false));
+    btnCancel?.addEventListener('click', () => requestClose(false));
+    btnClose?.addEventListener('click', () => requestClose(false));
+    btnConfirm?.addEventListener('click', () => requestClose(true));
+
+    sheet.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape'){
+            e.preventDefault();
+            requestClose(false);
+            return;
+        }
+        if (e.key === 'Enter'){
+            e.preventDefault();
+            requestClose(true);
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!document.body.classList.contains('confirm-sheet-open')) return;
+        if (e.key === 'Escape'){
+            e.preventDefault();
+            requestClose(false);
+        }
+    });
+
+    return confirmSheetState;
+}
+
+function openConfirmSheet({ title, subtitle, messageHtml, confirmText, cancelText } = {}){
+    const state = ensureConfirmSheet();
+    if (!state) return Promise.resolve(false);
+
+    state.sessionSeq += 1;
+    const sessionId = state.sessionSeq;
+    state.activeSession = sessionId;
+
+    if (state.titleEl) state.titleEl.textContent = (title || 'Confirmar').toString();
+    if (state.subtitleEl) state.subtitleEl.textContent = (subtitle || 'Revisá antes de continuar.').toString();
+    if (state.messageEl) state.messageEl.innerHTML = (messageHtml || '').toString();
+    if (state.extraEl) state.extraEl.innerHTML = '';
+    state.payload = null;
+    if (state.btnConfirm) state.btnConfirm.textContent = (confirmText || 'Eliminar').toString();
+    if (state.btnCancel) state.btnCancel.textContent = (cancelText || 'Cancelar').toString();
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'flex';
+    void state.sheet.getBoundingClientRect();
+    document.body.classList.add('confirm-sheet-open');
+
+    requestAnimationFrame(() => state.btnConfirm?.focus());
+
+    return new Promise((resolve) => {
+        state.resolve = (result) => {
+            if (state.activeSession !== sessionId) return;
+            state.activeSession = 0;
+            resolve(!!result);
+        };
+    });
+}
+
+function openConfirmSheetWithOption({ title, subtitle, messageHtml, confirmText, cancelText, optionLabel, optionDefault } = {}){
+    const state = ensureConfirmSheet();
+    if (!state) return Promise.resolve({ confirmed: false, option: false });
+
+    state.sessionSeq += 1;
+    const sessionId = state.sessionSeq;
+    state.activeSession = sessionId;
+
+    if (state.titleEl) state.titleEl.textContent = (title || 'Confirmar').toString();
+    if (state.subtitleEl) state.subtitleEl.textContent = (subtitle || 'Revisá antes de continuar.').toString();
+    if (state.messageEl) state.messageEl.innerHTML = (messageHtml || '').toString();
+    if (state.btnConfirm) state.btnConfirm.textContent = (confirmText || 'Continuar').toString();
+    if (state.btnCancel) state.btnCancel.textContent = (cancelText || 'Cancelar').toString();
+
+    const checkedDefault = !!optionDefault;
+    state.payload = { option: checkedDefault };
+
+    if (state.extraEl){
+        state.extraEl.innerHTML = `
+            <label class="confirm-sheet__option">
+                <input type="checkbox" ${checkedDefault ? 'checked' : ''} />
+                <span>${escapeHtml((optionLabel || 'Opción').toString())}</span>
+            </label>
+        `;
+        const cb = state.extraEl.querySelector('input[type="checkbox"]');
+        const onChange = () => {
+            if (!state.payload) state.payload = { option: false };
+            state.payload.option = !!cb?.checked;
+        };
+        cb?.addEventListener('change', onChange);
+        state.cleanup = () => cb?.removeEventListener('change', onChange);
+    }
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'flex';
+    void state.sheet.getBoundingClientRect();
+    document.body.classList.add('confirm-sheet-open');
+    requestAnimationFrame(() => state.btnConfirm?.focus());
+
+    return new Promise((resolve) => {
+        state.resolve = (result) => {
+            if (state.activeSession !== sessionId) return;
+            state.activeSession = 0;
+            resolve({ confirmed: !!result, option: !!state.payload?.option });
+        };
+    });
+}
+
+function closeConfirmSheet(){
+    const state = confirmSheetState;
+    if (!state?.sheet || !state?.backdrop) return;
+
+    const sheet = state.sheet;
+    const backdrop = state.backdrop;
+    state.transitionSeq += 1;
+    const closeId = state.transitionSeq;
+
+    document.body.classList.remove('confirm-sheet-open');
+
+    const finalize = () => {
+        if (!confirmSheetState || confirmSheetState.transitionSeq !== closeId) return;
+        sheet.style.display = 'none';
+        backdrop.style.display = 'none';
+    };
+
+    let done = false;
+    const onEnd = (e) => {
+        if (done) return;
+        if (e.target !== sheet) return;
+        if (e.propertyName && e.propertyName !== 'transform' && e.propertyName !== 'opacity') return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    };
+
+    sheet.addEventListener('transitionend', onEnd);
+    window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    }, 420);
+}
+
+function ensurePromptSheet(){
+    if (promptSheetState?.sheet && promptSheetState?.backdrop) return promptSheetState;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'prompt-sheet-backdrop';
+    backdrop.style.display = 'none';
+
+    const sheet = document.createElement('section');
+    sheet.className = 'glass-panel details-panel prompt-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-label', 'Editar valor');
+    sheet.style.display = 'none';
+
+    sheet.innerHTML = `
+        <div class="prompt-sheet__header">
+            <div>
+                <h2 class="section-title" data-title>Editar</h2>
+                <p class="section-subtitle" data-subtitle>Ingresá un valor.</p>
+            </div>
+            <button type="button" class="icon-btn" data-close aria-label="Cerrar" title="Cerrar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="edit-grid" role="form" aria-label="Formulario editar valor">
+            <div class="edit-field">
+                <span class="edit-label" data-label>Valor</span>
+                <input data-input type="text" autocomplete="off" />
+                <span class="muted" data-hint hidden></span>
+            </div>
+
+            <p class="prompt-sheet-validation" role="alert" aria-live="polite" hidden></p>
+
+            <div class="action-group edit-actions">
+                <button class="btn btn-outline subtle" type="button" data-cancel>Cancelar</button>
+                <button class="btn btn-primary" type="button" data-confirm>Guardar</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(sheet);
+
+    const titleEl = sheet.querySelector('[data-title]');
+    const subtitleEl = sheet.querySelector('[data-subtitle]');
+    const labelEl = sheet.querySelector('[data-label]');
+    const inputEl = sheet.querySelector('[data-input]');
+    const hintEl = sheet.querySelector('[data-hint]');
+    const validation = sheet.querySelector('.prompt-sheet-validation');
+    const btnConfirm = sheet.querySelector('[data-confirm]');
+    const btnCancel = sheet.querySelector('[data-cancel]');
+    const btnClose = sheet.querySelector('[data-close]');
+
+    promptSheetState = {
+        backdrop,
+        sheet,
+        titleEl,
+        subtitleEl,
+        labelEl,
+        inputEl,
+        hintEl,
+        validation,
+        btnConfirm,
+        btnCancel,
+        btnClose,
+        sessionSeq: 0,
+        activeSession: 0,
+        transitionSeq: 0,
+        resolve: null,
+        validate: null
+    };
+
+    function showValidation(message){
+        if (!validation) return;
+        const msg = (message || '').toString().trim();
+        if (!msg){
+            validation.hidden = true;
+            validation.textContent = '';
+            return;
+        }
+        validation.textContent = msg;
+        validation.hidden = false;
+    }
+
+    function requestClose(result){
+        const r = promptSheetState?.resolve;
+        if (typeof r === 'function'){
+            promptSheetState.resolve = null;
+            r(result);
+        }
+        closePromptSheet();
+    }
+
+    function submit(){
+        const raw = (inputEl?.value || '').toString();
+        const validator = promptSheetState?.validate;
+        const errorMsg = (typeof validator === 'function') ? validator(raw) : null;
+        if (typeof errorMsg === 'string' && errorMsg.trim()){
+            showValidation(errorMsg);
+            inputEl?.focus();
+            return;
+        }
+        showValidation('');
+        requestClose(raw);
+    }
+
+    backdrop.addEventListener('click', () => requestClose(null));
+    btnCancel?.addEventListener('click', () => requestClose(null));
+    btnClose?.addEventListener('click', () => requestClose(null));
+    btnConfirm?.addEventListener('click', submit);
+
+    sheet.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape'){
+            e.preventDefault();
+            requestClose(null);
+            return;
+        }
+        if (e.key === 'Enter'){
+            const tag = (e.target?.tagName || '').toLowerCase();
+            if (tag === 'input'){
+                e.preventDefault();
+                submit();
+            }
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!document.body.classList.contains('prompt-sheet-open')) return;
+        if (e.key === 'Escape'){
+            e.preventDefault();
+            requestClose(null);
+        }
+    });
+
+    return promptSheetState;
+}
+
+function openPromptSheet({ title, subtitle, label, hint, value, placeholder, inputMode, confirmText, cancelText, validate } = {}){
+    const state = ensurePromptSheet();
+    if (!state) return Promise.resolve(null);
+
+    state.sessionSeq += 1;
+    const sessionId = state.sessionSeq;
+    state.activeSession = sessionId;
+    state.validate = (typeof validate === 'function') ? validate : null;
+
+    if (state.titleEl) state.titleEl.textContent = (title || 'Editar').toString();
+    if (state.subtitleEl) state.subtitleEl.textContent = (subtitle || 'Ingresá un valor.').toString();
+    if (state.labelEl) state.labelEl.textContent = (label || 'Valor').toString();
+    if (state.hintEl){
+        const h = (hint || '').toString().trim();
+        state.hintEl.textContent = h;
+        state.hintEl.hidden = !h;
+    }
+    if (state.inputEl){
+        state.inputEl.value = (value ?? '').toString();
+        state.inputEl.placeholder = (placeholder || '').toString();
+        if (inputMode) state.inputEl.inputMode = String(inputMode);
+    }
+    if (state.validation){
+        state.validation.hidden = true;
+        state.validation.textContent = '';
+    }
+    if (state.btnConfirm) state.btnConfirm.textContent = (confirmText || 'Guardar').toString();
+    if (state.btnCancel) state.btnCancel.textContent = (cancelText || 'Cancelar').toString();
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'flex';
+    void state.sheet.getBoundingClientRect();
+    document.body.classList.add('prompt-sheet-open');
+
+    requestAnimationFrame(() => {
+        state.inputEl?.focus();
+        state.inputEl?.select?.();
+    });
+
+    return new Promise((resolve) => {
+        state.resolve = (result) => {
+            if (state.activeSession !== sessionId) return;
+            state.activeSession = 0;
+            resolve(result === null ? null : String(result));
+        };
+    });
+}
+
+function closePromptSheet(){
+    const state = promptSheetState;
+    if (!state?.sheet || !state?.backdrop) return;
+
+    const sheet = state.sheet;
+    const backdrop = state.backdrop;
+    state.transitionSeq += 1;
+    const closeId = state.transitionSeq;
+
+    document.body.classList.remove('prompt-sheet-open');
+
+    const finalize = () => {
+        if (!promptSheetState || promptSheetState.transitionSeq !== closeId) return;
+        sheet.style.display = 'none';
+        backdrop.style.display = 'none';
+    };
+
+    let done = false;
+    const onEnd = (e) => {
+        if (done) return;
+        if (e.target !== sheet) return;
+        if (e.propertyName && e.propertyName !== 'transform' && e.propertyName !== 'opacity') return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    };
+
+    sheet.addEventListener('transitionend', onEnd);
+    window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    }, 420);
+}
+
+async function agregarCliente(){
+    const formValues = await openAddClientSheet();
     if (formValues) {
         const idNegocio = getIdNegocioForWrite();
         if (idNegocio === undefined){
@@ -526,15 +1183,15 @@ async function borrarClienteActual(){
 }
 async function borrarCliente(telefono, nombre, cardEl){
     const tel = normalizePhone(telefono);
-    const result = await Swal.fire({
+
+    const ok = await openConfirmSheet({
         title: 'Borrar cliente',
-        text: `¿Estás seguro de que deseas borrar al cliente ${escapeHtml(nombre)}?`,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Borrar',
-        cancelButtonText: 'Cancelar'
+        subtitle: 'Esta acción no se puede deshacer.',
+        messageHtml: `¿Estás seguro de que deseas borrar al cliente <strong>${escapeHtml(nombre)}</strong>?`,
+        confirmText: 'Borrar',
+        cancelText: 'Cancelar'
     });
-    if (!result.isConfirmed) return;
+    if (!ok) return;
 
     let del = supabase
         .from('Clientes')
@@ -898,18 +1555,37 @@ async function confirmarYEliminarOperacionDesdeDrawer(){
     const monto = Number(item?.Monto ?? item?.monto ?? 0) || 0;
     const fecha = formatDate(item?.Creado ?? item?.created_at ?? item?.fecha ?? item?.creado ?? '');
     const titulo = (tipo === 'deudas') ? 'Eliminar deuda' : 'Eliminar pago';
-    const confirm = await Swal.fire({
-        title: titulo,
-        html: `Al eliminar el pago/deuda <strong>solo se elimina el registro</strong>.<br><br><span class="muted">La deuda acumulada (Deuda Activa) del cliente no cambiará.</span>`,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Eliminar',
-        cancelButtonText: 'Cancelar'
-    });
-    if (!confirm.isConfirmed) return;
+
+    let shouldAdjustDeuda = false;
+    if (tipo === 'deudas'){
+        const res = await openConfirmSheetWithOption({
+            title: titulo,
+            subtitle: 'Este registro es solo archivo.',
+            messageHtml: `Vas a eliminar <strong>un registro</strong> (archivo) de deuda por <strong>${escapeHtml(formatter.format(monto))}</strong> del <strong>${escapeHtml(String(fecha))}</strong>.<br><br><span class="muted">Por defecto, la Deuda Activa del cliente no cambia.</span>`,
+            confirmText: 'Eliminar',
+            cancelText: 'Cancelar',
+            optionLabel: 'Restar este monto de la Deuda Activa del cliente',
+            optionDefault: false
+        });
+        if (!res.confirmed) return;
+        shouldAdjustDeuda = !!res.option;
+    } else {
+        const okConfirm = await openConfirmSheet({
+            title: titulo,
+            subtitle: 'Solo se eliminará el registro.',
+            messageHtml: `Al eliminar el pago <strong>solo se elimina el registro</strong>.<br><br><span class="muted">Los totales se recalculan por historial.</span>`,
+            confirmText: 'Eliminar',
+            cancelText: 'Cancelar'
+        });
+        if (!okConfirm) return;
+    }
 
     const ok = await eliminarOperacionIndiv(item, tipo, currentClienteTelefono);
     if (!ok) return;
+
+    if (tipo === 'deudas' && shouldAdjustDeuda){
+        await ajustarDeudaActivaCliente(currentClienteTelefono, -monto);
+    }
 
     // refrescar panel
     try{
@@ -1016,33 +1692,28 @@ async function mostrarDetallesClienteModal(cliente){
     elTotalAdeudado?.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         const valorActual = Number(cliente.Deuda_Activa) || 0;
-        const { value: nuevoStr } = await Swal.fire({
+        const nuevoStr = await openPromptSheet({
             title: 'Editar Deuda Activa',
-            input: 'text',
-            inputLabel: 'Nuevo monto (ARS)',
-            inputValue: valorActual.toFixed(2),
-            showCancelButton: true,
-            confirmButtonText: 'Guardar',
-            cancelButtonText: 'Cancelar',
-            inputAttributes: { 'aria-label': 'Nuevo monto de deuda activa' },
-            preConfirm: (val) => {
-                if (val === null || val === undefined || val.trim() === '') {
-                    return 'Ingresa un monto';
-                }
-                // Normalizar: reemplazar coma por punto y quitar símbolos
-                const normalizado = val.replace(/[^0-9,\.]/g,'').replace(',', '.');
+            subtitle: 'Nuevo monto (ARS)',
+            label: 'Nuevo monto (ARS)',
+            hint: 'Se guardará como Deuda Activa del cliente.',
+            value: valorActual.toFixed(2),
+            placeholder: '0.00',
+            inputMode: 'decimal',
+            confirmText: 'Guardar',
+            cancelText: 'Cancelar',
+            validate: (val) => {
+                if (val === null || val === undefined || String(val).trim() === '') return 'Ingresa un monto';
+                const normalizado = String(val).replace(/[^0-9,\.]/g,'').replace(',', '.');
                 const num = parseFloat(normalizado);
-                if (isNaN(num) || num < 0) {
-                    return 'Monto inválido';
-                }
-                if (num > 1_000_000_000) {
-                    return 'Monto demasiado grande';
-                }
-                return normalizado; // devolver valor normalizado
+                if (Number.isNaN(num) || num < 0) return 'Monto inválido';
+                if (num > 1_000_000_000) return 'Monto demasiado grande';
+                return null;
             }
         });
-        if (nuevoStr === undefined) return; // cancelado
-        const nuevo = parseFloat(nuevoStr);
+        if (nuevoStr === null) return; // cancelado
+        const normalizado = String(nuevoStr).replace(/[^0-9,\.]/g,'').replace(',', '.');
+        const nuevo = parseFloat(normalizado);
         if (isNaN(nuevo)) return;
         try {
             let upd = supabase
@@ -1118,17 +1789,21 @@ async function mostrarDetallesClienteModal(cliente){
                     delBtn.style.cssText = 'background:#d33;color:#fff;border-color:transparent;';
                     delBtn.addEventListener('click', async (ev) => {
                         ev.stopPropagation();
-                        const confirm = await Swal.fire({
+                        const res = await openConfirmSheetWithOption({
                             title: 'Eliminar deuda',
-                            text: `¿Eliminar la deuda de ${formatterLocal.format(monto)} del ${fecha}?`,
-                            icon: 'warning',
-                            showCancelButton: true,
-                            confirmButtonText: 'Eliminar',
-                            cancelButtonText: 'Cancelar'
+                            subtitle: 'Este registro es solo archivo.',
+                            messageHtml: `Vas a eliminar <strong>un registro</strong> (archivo) de deuda por <strong>${escapeHtml(formatterLocal.format(monto))}</strong> del <strong>${escapeHtml(String(fecha))}</strong>.<br><br><span class="muted">Por defecto, la Deuda Activa del cliente no cambia.</span>`,
+                            confirmText: 'Eliminar',
+                            cancelText: 'Cancelar',
+                            optionLabel: 'Restar este monto de la Deuda Activa del cliente',
+                            optionDefault: false
                         });
-                        if (!confirm.isConfirmed) return;
+                        if (!res.confirmed) return;
                         const ok = await eliminarDeudaIndiv(item, telefono);
                         if (ok){
+                            if (res.option){
+                                await ajustarDeudaActivaCliente(telefono, -monto);
+                            }
                             await updateTotals();
                             await loadOps(view);
                             await showSuccessToast('Deuda eliminada');
@@ -1179,17 +1854,63 @@ async function mostrarDetallesClienteModal(cliente){
     btnPagos?.addEventListener('click', async () => { modalView = 'pagos'; setActiveTabs(); await loadOps(modalView); });
     btnEliminarTodas?.addEventListener('click', async () => {
         if (modalView !== 'deudas') return;
-        const confirm = await Swal.fire({
-            title: 'Eliminar todas las deudas',
-            text: '¿Eliminar TODAS las deudas de este cliente? Esta acción no se puede deshacer.',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'Eliminar todas',
-            cancelButtonText: 'Cancelar'
-        });
-        if (!confirm.isConfirmed) return;
+        // Intentar calcular el total de registros a eliminar (para la opción de ajustar Deuda Activa)
+        let totalMonto = 0;
+        let count = 0;
+        let countKnown = false;
+        try{
+            let q = supabase
+                .from('Deudas')
+                .select('Monto')
+                .eq('Telefono_cliente', telefono);
+            q = applyIdNegocioFilter(q);
+            const { data, error } = await q;
+            if (!error){
+                const arr = data || [];
+                count = arr.length;
+                totalMonto = arr.reduce((acc, d) => acc + (Number(d?.Monto) || 0), 0);
+                countKnown = true;
+            }
+        }catch(e){
+            // best-effort; si falla, igual permitimos borrar
+            console.warn('No se pudo calcular el total de deudas para ajustar Deuda Activa', e);
+        }
+
+        if (countKnown && count === 0){
+            await showinfo('Sin deudas', 'No hay deudas para eliminar.');
+            return;
+        }
+
+        let shouldAdjust = false;
+        if (countKnown){
+            const formatter = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+            const res = await openConfirmSheetWithOption({
+                title: 'Eliminar todas las deudas',
+                subtitle: 'Estos registros son solo archivo.',
+                messageHtml: `Vas a eliminar <strong>${escapeHtml(String(count))}</strong> registros (archivo) de deudas por un total de <strong>${escapeHtml(formatter.format(totalMonto))}</strong>.<br><br><span class="muted">Por defecto, la Deuda Activa del cliente no cambia.</span>`,
+                confirmText: 'Eliminar todas',
+                cancelText: 'Cancelar',
+                optionLabel: 'Restar este total de la Deuda Activa del cliente',
+                optionDefault: false
+            });
+            if (!res.confirmed) return;
+            shouldAdjust = !!res.option;
+        } else {
+            const okConfirm = await openConfirmSheet({
+                title: 'Eliminar todas las deudas',
+                subtitle: 'Estos registros son solo archivo.',
+                messageHtml: '¿Eliminar <strong>TODAS</strong> las deudas de este cliente?<br><br><span class="muted">Por defecto, la Deuda Activa del cliente no cambia.</span>',
+                confirmText: 'Eliminar todas',
+                cancelText: 'Cancelar'
+            });
+            if (!okConfirm) return;
+        }
+
         const ok = await eliminarDeudasCliente(telefono);
         if (ok){
+            if (shouldAdjust){
+                await ajustarDeudaActivaCliente(telefono, -totalMonto);
+            }
             await updateTotals();
             await loadOps(modalView);
             await showSuccessToast('Deudas eliminadas');

@@ -380,49 +380,6 @@ img {
 	main > section { padding: 16px; }
 }
 
-/* SweetAlert2 (coherente y compatible con ambos temas) */
-.swal2-popup {
-	/* En Config V2, --bg-elev es muy transparente; subimos opacidad */
-	background: rgba(var(--bg-rgb), 0.88) !important;
-	backdrop-filter: blur(18px);
-	-webkit-backdrop-filter: blur(18px);
-	color: var(--text) !important;
-	border: 1px solid var(--border) !important;
-	border-radius: 16px;
-	box-shadow: var(--glass-shadow);
-}
-
-.swal2-title { color: var(--heading) !important; }
-.swal2-html-container { color: var(--text) !important; }
-
-.swal2-input,
-.swal2-textarea {
-	background: rgba(var(--bg-rgb), 0.72) !important;
-	color: var(--text) !important;
-	border: 1px solid var(--border) !important;
-	border-radius: 14px !important;
-}
-
-.swal2-input::placeholder,
-.swal2-textarea::placeholder {
-	color: color-mix(in srgb, var(--muted) 88%, transparent) !important;
-}
-
-.swal2-confirm {
-	background: var(--primary) !important;
-	border-radius: 10px !important;
-}
-.swal2-confirm:hover { background: var(--primary-600) !important; }
-
-.swal2-cancel {
-	background: transparent !important;
-	color: var(--text) !important;
-	border: 1px solid var(--border) !important;
-	border-radius: 10px !important;
-}
-
-.swal2-actions .swal2-styled:focus { box-shadow: 0 0 0 3px var(--ring) !important; }
-
 /* ------------------------------------------------------------------
    Config V2 - Glassmorphism Premium (aligned with Inicio)
 ------------------------------------------------------------------ */
@@ -945,6 +902,202 @@ button.ios-switch::after {
 	color: var(--danger);
 	border-color: var(--danger);
 	background: rgba(244, 63, 94, 0.1);
+}
+
+/* =====================
+   Bottom-sheet (Config)
+   ===================== */
+.cfg-sheet-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.6);
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.18s ease, visibility 0.18s ease;
+	z-index: 180;
+}
+
+.cfg-sheet {
+	position: fixed;
+	left: 50%;
+	transform: translateX(-50%) translateY(14px);
+	bottom: calc(var(--footer-h) + 16px + env(safe-area-inset-bottom, 0px));
+	width: min(560px, calc(100vw - 20px));
+	max-height: min(72dvh, 620px);
+	overflow: auto;
+	border: 1px solid var(--border);
+	border-radius: 22px;
+	background: var(--bg-elev);
+	backdrop-filter: blur(24px);
+	-webkit-backdrop-filter: blur(24px);
+	box-shadow: var(--glass-shadow);
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition: opacity 0.18s ease, transform 0.18s ease, visibility 0.18s ease;
+	z-index: 190;
+}
+
+body.cfg-sheet-open .cfg-sheet-backdrop {
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+}
+
+body.cfg-sheet-open .cfg-sheet {
+	opacity: 1;
+	visibility: visible;
+	pointer-events: auto;
+	transform: translateX(-50%) translateY(0);
+}
+
+.cfg-sheet__header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 14px 14px 10px;
+	border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.cfg-sheet__title {
+	margin: 0;
+	font-size: 1.05rem;
+	font-weight: 850;
+	letter-spacing: -0.02em;
+	color: var(--heading);
+}
+
+.cfg-sheet__subtitle {
+	margin: 4px 0 0;
+	font-size: 0.86rem;
+	color: var(--muted);
+}
+
+.cfg-sheet__close {
+	appearance: none;
+	-webkit-appearance: none;
+	border: 1px solid var(--border);
+	background: rgba(255, 255, 255, 0.05);
+	color: var(--heading);
+	border-radius: 12px;
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	line-height: 1;
+	font-size: 22px;
+	cursor: pointer;
+	box-shadow: none;
+}
+
+:root[data-theme="light"] .cfg-sheet__close {
+	background: rgba(0, 0, 0, 0.04);
+}
+
+.cfg-sheet__close:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 3px var(--ring);
+}
+
+.cfg-sheet__body {
+	padding: 12px 14px 14px;
+	display: grid;
+	gap: 12px;
+}
+
+.cfg-sheet__message {
+	font-size: 0.92rem;
+	color: var(--text);
+}
+
+.cfg-sheet__actions {
+	display: flex;
+	gap: 10px;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+}
+
+.cfg-btn {
+	appearance: none;
+	-webkit-appearance: none;
+	border: 0;
+	border-radius: 12px;
+	min-height: 44px;
+	padding: 10px 14px;
+	cursor: pointer;
+	font-weight: 800;
+	box-shadow: none;
+}
+
+.cfg-btn--primary {
+	background: var(--primary);
+	color: var(--on-primary);
+}
+
+.cfg-btn--ghost {
+	background: transparent;
+	color: var(--text);
+	border: 1px solid var(--border);
+}
+
+.cfg-btn--danger {
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	color: var(--heading);
+	border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--border));
+}
+
+.cfg-btn:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 3px var(--ring);
+}
+
+.cfg-sheet__spinner {
+	width: 22px;
+	height: 22px;
+	border-radius: 999px;
+	border: 3px solid color-mix(in srgb, var(--border) 70%, transparent);
+	border-top-color: var(--heading);
+	animation: cfgSpin 0.9s linear infinite;
+}
+
+@keyframes cfgSpin {
+	to { transform: rotate(360deg); }
+}
+
+/* =====================
+   Toast (Config)
+   ===================== */
+.cfg-toast {
+	position: fixed;
+	top: calc(var(--header-h) + 12px);
+	right: 12px;
+	z-index: 200;
+	max-width: min(360px, calc(100vw - 24px));
+	padding: 10px 12px;
+	border-radius: 14px;
+	border: 1px solid var(--border);
+	background: var(--bg-elev);
+	backdrop-filter: blur(20px);
+	-webkit-backdrop-filter: blur(20px);
+	box-shadow: var(--glass-shadow);
+	opacity: 0;
+	transform: translateY(-8px);
+	pointer-events: none;
+	transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.cfg-toast.is-open {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+.cfg-toast.is-success {
+	border-color: color-mix(in srgb, var(--success) 36%, var(--border));
+}
+
+.cfg-toast.is-error {
+	border-color: color-mix(in srgb, var(--danger) 48%, var(--border));
 }
 
 @media (prefers-reduced-motion: reduce) {

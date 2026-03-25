@@ -1,9 +1,259 @@
-import {showError, showSuccess, showErrorToast, showSuccessToast, showinfo, showInfoHTML, loadSweetAlert2} from './sweetalert2.js'
-import {loadSupabase, loadSupaBseWithAuth} from './supabase.js'
+import {loadSupabase} from './supabase.js'
 const client= await loadSupabase();
 let currentOpView = 'deudas'; // 'deudas' | 'pagos'
 let isExpanded = false; // controls whether list shows all items or limited
 let operacionIngresoInit = false;
+
+// ── Bottom sheet (reemplazo de SweetAlert en Inicio) ──
+let cmsSheetEls = null;
+let cmsSheetResolve = null;
+let cmsSheetAutoCloseTimer = null;
+let cmsSheetId = 0;
+
+function ensureCmsSheet(){
+    if (cmsSheetEls) return cmsSheetEls;
+
+    let backdrop = document.getElementById('cmsSheetBackdrop');
+    if (!backdrop){
+        backdrop = document.createElement('div');
+        backdrop.id = 'cmsSheetBackdrop';
+        backdrop.className = 'cms-sheet-backdrop';
+        backdrop.style.display = 'none';
+        document.body.appendChild(backdrop);
+    }
+
+    let drawer = document.getElementById('cmsSheetDrawer');
+    if (!drawer){
+        drawer = document.createElement('div');
+        drawer.id = 'cmsSheetDrawer';
+        drawer.className = 'cms-sheet-drawer';
+        drawer.setAttribute('role', 'dialog');
+        drawer.setAttribute('aria-modal', 'true');
+        drawer.setAttribute('aria-label', 'Mensaje');
+        drawer.style.display = 'none';
+        drawer.innerHTML = `
+            <div class="opd-header">
+                <div class="opd-title">
+                    <h3 id="cmsSheetTitle">Mensaje</h3>
+                    <p id="cmsSheetSubtitle"></p>
+                </div>
+                <button type="button" class="icon-btn" id="cmsSheetClose" aria-label="Cerrar" title="Cerrar">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="opd-body">
+                <div id="cmsSheetContent"></div>
+                <div id="cmsSheetActions" class="cms-sheet-actions"></div>
+            </div>
+        `;
+        document.body.appendChild(drawer);
+    }
+
+    function close(){
+        closeCmsSheet('close');
+    }
+
+    backdrop.addEventListener('click', close);
+    drawer.querySelector('#cmsSheetClose')?.addEventListener('click', close);
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeCmsSheet('escape');
+    });
+
+    cmsSheetEls = {
+        backdrop,
+        drawer,
+        title: drawer.querySelector('#cmsSheetTitle'),
+        subtitle: drawer.querySelector('#cmsSheetSubtitle'),
+        content: drawer.querySelector('#cmsSheetContent'),
+        actions: drawer.querySelector('#cmsSheetActions'),
+    };
+    return cmsSheetEls;
+}
+
+function showCmsSheetElements(){
+    const els = ensureCmsSheet();
+    els.backdrop.style.display = 'block';
+    els.drawer.style.display = 'grid';
+    // Forzar reflow para que la transición arranque correctamente.
+    // eslint-disable-next-line no-unused-expressions
+    els.drawer.offsetHeight;
+    return els;
+}
+
+function hideCmsSheetElementsAfterTransition(localId){
+    const els = ensureCmsSheet();
+    const drawer = els.drawer;
+
+    const onEnd = (e) => {
+        if (e.target !== drawer) return;
+        if (e.propertyName !== 'transform') return;
+        drawer.removeEventListener('transitionend', onEnd);
+
+        // Si el sheet se reabrió durante el cierre, no ocultar.
+        if (cmsSheetId !== localId) return;
+        if (document.body.classList.contains('cms-sheet-open')) return;
+
+        els.drawer.style.display = 'none';
+        els.backdrop.style.display = 'none';
+    };
+
+    drawer.addEventListener('transitionend', onEnd);
+}
+
+function closeCmsSheet(reason){
+    document.body.classList.remove('cms-sheet-open');
+
+    // Cuando termine la animación de cierre, ocultar el contenedor.
+    hideCmsSheetElementsAfterTransition(cmsSheetId);
+
+    if (cmsSheetAutoCloseTimer){
+        clearTimeout(cmsSheetAutoCloseTimer);
+        cmsSheetAutoCloseTimer = null;
+    }
+    if (typeof cmsSheetResolve === 'function'){
+        const r = cmsSheetResolve;
+        cmsSheetResolve = null;
+        r({ action: reason || 'close' });
+    }
+}
+
+function setCmsSheetActions(actions){
+    const els = ensureCmsSheet();
+    if (!els.actions) return;
+    const list = Array.isArray(actions) ? actions : [];
+
+    if (list.length === 0){
+        els.actions.innerHTML = '';
+        return;
+    }
+
+    els.actions.innerHTML = '';
+    list.forEach((a) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = String(a?.label ?? 'OK');
+        btn.className = a?.className || 'btn btn-primary';
+        btn.addEventListener('click', () => {
+            const value = a?.value ?? 'ok';
+            closeCmsSheet(value);
+        });
+        els.actions.appendChild(btn);
+    });
+}
+
+function openCmsSheet(opts){
+    cmsSheetId++;
+    const localId = cmsSheetId;
+
+    const els = showCmsSheetElements();
+    const title = String(opts?.title ?? 'Mensaje');
+    const subtitle = String(opts?.subtitle ?? '');
+    const contentHtml = String(opts?.contentHtml ?? '');
+    const actions = opts?.actions;
+    const autoCloseMs = Number(opts?.autoCloseMs ?? 0);
+
+    if (els.title) els.title.textContent = title;
+    if (els.subtitle) els.subtitle.textContent = subtitle;
+    if (els.content) els.content.innerHTML = contentHtml;
+    setCmsSheetActions(actions);
+
+    document.body.classList.add('cms-sheet-open');
+
+    if (cmsSheetAutoCloseTimer){
+        clearTimeout(cmsSheetAutoCloseTimer);
+        cmsSheetAutoCloseTimer = null;
+    }
+
+    const closed = new Promise((resolve) => {
+        cmsSheetResolve = resolve;
+    });
+
+    if (Number.isFinite(autoCloseMs) && autoCloseMs > 0){
+        cmsSheetAutoCloseTimer = setTimeout(() => closeCmsSheet('auto'), autoCloseMs);
+    }
+
+    return {
+        els,
+        closed,
+        setTitle: (t) => { if (els.title) els.title.textContent = String(t ?? ''); },
+        setSubtitle: (s) => { if (els.subtitle) els.subtitle.textContent = String(s ?? ''); },
+        setContent: (html) => { if (els.content) els.content.innerHTML = String(html ?? ''); },
+        setActions: (a) => setCmsSheetActions(a),
+        close: (reason) => {
+            // Mantener coherencia si se intenta cerrar desde una referencia vieja.
+            if (cmsSheetId !== localId) return;
+            closeCmsSheet(reason);
+        },
+    };
+}
+
+function sheetText(message, tone){
+    const cls = tone === 'success'
+        ? 'opd-value--success'
+        : tone === 'error'
+            ? 'opd-value--danger'
+            : '';
+    return `
+        <div class="opd-list">
+            <div class="opd-item">
+                <div>
+                    <h4>Mensaje</h4>
+                    <small>—</small>
+                </div>
+                <div class="opd-value ${cls}" style="white-space:normal; text-align:left; margin-left:0; width:100%;">${escapeHtml(String(message ?? ''))}</div>
+            </div>
+        </div>
+    `;
+}
+
+async function showErrorToast(message){
+    const s = openCmsSheet({
+        title: 'Error',
+        subtitle: '',
+        contentHtml: sheetText(message, 'error'),
+        actions: [],
+        autoCloseMs: 1800,
+    });
+    await s.closed;
+}
+
+async function showSuccessToast(message){
+    const s = openCmsSheet({
+        title: 'Listo',
+        subtitle: '',
+        contentHtml: sheetText(message, 'success'),
+        actions: [],
+        autoCloseMs: 1400,
+    });
+    await s.closed;
+}
+
+async function showInfoSheet(message, title){
+    const s = openCmsSheet({
+        title: title || 'Información',
+        subtitle: '',
+        contentHtml: sheetText(message, 'info'),
+        actions: [{ label: 'OK', value: 'ok', className: 'btn btn-primary' }],
+    });
+    await s.closed;
+}
+
+async function confirmSheet(message, opts){
+    const s = openCmsSheet({
+        title: opts?.title || 'Confirmar',
+        subtitle: opts?.subtitle || '',
+        contentHtml: sheetText(message, opts?.tone || 'info'),
+        actions: [
+            { label: opts?.cancelText || 'Cancelar', value: 'cancel', className: 'btn-clear secondary' },
+            { label: opts?.confirmText || 'Aceptar', value: 'confirm', className: 'btn btn-primary' },
+        ],
+    });
+    const res = await s.closed;
+    return res?.action === 'confirm';
+}
 
 // --- Multi-tenant helper (ID_Negocio) ---
 // Regla:
@@ -698,445 +948,6 @@ function setActiveTab(tipo){
 
 }
 
-async function openRegistroOperacion(){
-    await window.loadSweetAlert2();
-    const html = `
-        <style>
-      .swal-reg{display:grid;gap:12px;text-align:left;max-width:100%}
-      .swal-reg .reg-row{display:flex;flex-direction:column;gap:8px}
-      .swal-reg .reg-matches{max-height:35vh;overflow:auto}
-      .swal-reg .reg-amount{width:100% !important;text-align:right !important;font-size:clamp(1.1rem,2.5vw,1.5rem) !important;font-weight:700 !important}
-            .swal-reg .swal2-input{width:100% !important;max-width:100%;box-sizing:border-box;display:block;margin:0;text-align:center}
-      .swal-reg .calc-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:8px}
-      .swal-reg .calc-grid button{min-height:44px}
-      .swal-reg .reg-actions{margin-top:8px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
-      .swal-reg .btn-clear{padding:10px 16px;border-radius:8px}
-      .swal-reg .btn-eq{background-color:#28a745 !important;color:#fff}
-            .swal-reg .type-row{display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:8px}
-            /* Modern chips for Pago/Deuda */
-            .swal-reg .type-chip{position:relative;display:inline-flex;align-items:center}
-            .swal-reg .type-chip input{position:absolute;opacity:0;pointer-events:none}
-            .swal-reg .type-chip .chip{display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:999px;border:1px solid var(--border, rgba(255,255,255,0.15));background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));color:var(--text, #e5e7eb);font-weight:700;letter-spacing:.2px;box-shadow:0 4px 14px rgba(0,0,0,.25);transition:transform .12s ease, box-shadow .2s ease, background .2s ease, border-color .2s ease}
-            .swal-reg .type-chip:hover .chip{transform:translateY(-1px);box-shadow:0 8px 22px rgba(0,0,0,.3)}
-            .swal-reg .type-chip input:focus + .chip{outline:2px solid var(--ring, #7c3aed);outline-offset:2px}
-            .swal-reg .type-chip.pago input:checked + .chip{background:var(--success, #16a34a);color:#fff;border-color:transparent;box-shadow:0 10px 24px rgba(22,163,74,.35), inset 0 -2px 0 rgba(0,0,0,.15)}
-            .swal-reg .type-chip.deuda input:checked + .chip{background:var(--danger, #dc2626);color:#fff;border-color:transparent;box-shadow:0 10px 24px rgba(220,38,38,.35), inset 0 -2px 0 rgba(0,0,0,.15)}
-            @media (max-width: 480px){
-                /* Mantener 4 columnas y posicionar operadores a la derecha */
-                .swal-reg .calc-grid{grid-template-columns:repeat(4,1fr)}
-                /* Reordenar operadores para incluir división: */
-                /* Fila 1: 7 8 9 ÷ */
-                #calc .calc-btn[data-key="7"]{grid-column:1;grid-row:1}
-                #calc .calc-btn[data-key="8"]{grid-column:2;grid-row:1}
-                #calc .calc-btn[data-key="9"]{grid-column:3;grid-row:1}
-                #calc .calc-op[data-op="/"]{grid-column:4;grid-row:1}
-                /* Fila 2: 4 5 6 × */
-                #calc .calc-btn[data-key="4"]{grid-column:1;grid-row:2}
-                #calc .calc-btn[data-key="5"]{grid-column:2;grid-row:2}
-                #calc .calc-btn[data-key="6"]{grid-column:3;grid-row:2}
-                #calc .calc-op[data-op="*"]{grid-column:4;grid-row:2}
-                /* Fila 3: 1 2 3 - */
-                #calc .calc-btn[data-key="1"]{grid-column:1;grid-row:3}
-                #calc .calc-btn[data-key="2"]{grid-column:2;grid-row:3}
-                #calc .calc-btn[data-key="3"]{grid-column:3;grid-row:3}
-                #calc .calc-op[data-op="-"]{grid-column:4;grid-row:3}
-                /* Fila 4: 0 . = + */
-                #calc .calc-btn[data-key="0"]{grid-column:1 !important;grid-row:4}
-                #calc .calc-btn[data-key="."]{grid-column:2;grid-row:4}
-                #calc #calc-eq{grid-column:3;grid-row:4}
-                #calc .calc-op[data-op="+"]{grid-column:4;grid-row:4}
-                /* Acciones debajo siguen siendo responsivas */
-                .swal-reg .reg-actions{justify-content:stretch}
-                .swal-reg .btn-clear{flex:1}
-            }
-    </style>
-    <div class="swal-reg">
-        <label style="font-weight:600">Buscar Cliente (nombre, apellido o teléfono)</label>
-        <input id="clientSearch" class="swal2-input" placeholder="Escribe nombre, apellido o teléfono" style="width:100%">
-        <div id="clientMatches" class="reg-matches"></div>
-
-        <label style="font-weight:600">Detalles</label>
-        <input id="opCategory" class="swal2-input" placeholder="Detalles (p.ej. Servicio, Producto)" style="width:100%">
-
-        <label style="font-weight:600">Monto</label>
-        <input id="opAmount" class="swal2-input reg-amount" value="0"> 
-        
-        <div id="calc" class="calc-grid">
-            <button type="button" class="calc-btn" data-key="7">7</button>
-            <button type="button" class="calc-btn" data-key="8">8</button>
-            <button type="button" class="calc-btn" data-key="9">9</button>
-            <button type="button" class="calc-op" data-op="+">+</button>
-
-            <button type="button" class="calc-btn" data-key="4">4</button>
-            <button type="button" class="calc-btn" data-key="5">5</button>
-            <button type="button" class="calc-btn" data-key="6">6</button>
-            <button type="button" class="calc-op" data-op="-">-</button>
-
-            <button type="button" class="calc-btn" data-key="1">1</button>
-            <button type="button" class="calc-btn" data-key="2">2</button>
-            <button type="button" class="calc-btn" data-key="3">3</button>
-            <button type="button" class="calc-op" data-op="*">×</button>
-            <button type="button" class="calc-op" data-op="/">÷</button>
-            
-            <button type="button" class="calc-btn" data-key="0" style="grid-column: span 2;">0</button>
-            <button type="button" class="calc-btn" data-key=".">.</button>
-            <button type="button" id="calc-eq" class="btn-eq">=</button>
-        </div>
-        <!-- Acciones: Backspace (⌫) y Clear (C) -->
-        <div class="reg-actions">
-            <button type="button" id="calc-back" class="btn-clear" style="background-color:#6b7280 !important; color:white;" title="Borrar un dígito">⌫</button>
-            <button type="button" id="calc-clear" class="btn-clear" style="background-color:#d33 !important; color:white;">C</button>
-        </div>
-        <div>
-        <div class="type-row" style="display:flex; gap:12px; align-items:center; margin-top:8px;">
-            <label class="type-chip pago" style="cursor:pointer;">
-                <input type="checkbox" id="chkPago" onclick="const d=document.getElementById('chkDeuda'); if(this.checked) d.checked=false;">
-                <span class="chip">Pago</span>
-            </label>
-            <label class="type-chip deuda" style="cursor:pointer;">
-                <input type="checkbox" id="chkDeuda" onclick="const p=document.getElementById('chkPago'); if(this.checked) p.checked=false;">
-                <span class="chip">Deuda</span>
-            </label>
-        </div>
-        </div>
-    </div>
-    `;
-
-    
-    const result = await window.Swal.fire({
-        title: 'Registrar Operación',
-        html,
-        focusConfirm: false,
-        showCancelButton: true,
-    confirmButtonText: 'Registrar Operación',
-        cancelButtonText: 'Cancelar',
-        showLoaderOnConfirm: true,
-        preConfirm: async () => {
-            const nameInput = document.getElementById('clientSearch');
-            const catInput = document.getElementById('opCategory');
-            const amountInput = document.getElementById('opAmount');
-            const tipo = document.getElementById('chkPago').checked ? 'pago' : 'deuda';
-            const name = nameInput ? nameInput.value.trim() : '';
-            const categoria = catInput ? catInput.value.trim() : '';
-            const monto = amountInput ? parseFloat(amountInput.value) : 0;
-
-            if (isNaN(monto) || monto <= 0) {
-                window.Swal.showValidationMessage('Ingrese un monto válido mayor a 0');
-                return null;
-            }
-            const matchesEl = document.getElementById('clientMatches');
-            let phoneValue = null;
-            if (matchesEl && matchesEl.selectedClient) phoneValue = matchesEl.selectedClient.Telefono ?? null;
-            if (!phoneValue) {
-                const possible = name || '';
-                const digits = (possible.match(/\d+/g) || []).join('');
-                if (digits.length >= 6) phoneValue = digits;
-            }
-
-            const payload = {
-                Monto: monto,
-                Categoria: categoria,
-                Telefono_cliente: phoneValue,
-            };
-            try{
-                const idNegocio = getIdNegocioForWrite();
-                if (idNegocio === undefined){
-                    window.Swal.showValidationMessage('No se encontró el ID de usuario (UserID). Iniciá sesión nuevamente.');
-                    return null;
-                }
-
-                payload.ID_Negocio = idNegocio;
-                const table = tipo === 'deuda' ? 'Deudas' : 'Pagos';
-                const { data, error } = await client.from(table).insert(payload).select();
-                if (error){
-                    window.Swal.showValidationMessage('Error al registrar: ' + (error.message || error));
-                    return null;
-                }
-
-                // Actualizar Deuda_Activa según tipo
-                if (phoneValue) {
-                    let qClient = client
-                        .from('Clientes')
-                        .select('Deuda_Activa')
-                        .eq('Telefono', phoneValue);
-                    qClient = applyIdNegocioFilter(qClient);
-                    const { data: clientData, error: selectError } = await qClient.single();
-                    if (selectError) {
-                        console.error('Error al obtener deuda actual del cliente', selectError);
-                        // No abort registration, but inform user
-                        window.Swal.showValidationMessage('Error al obtener datos del cliente: ' + (selectError.message || selectError));
-                        return null;
-                    }
-
-                    const current = Number(clientData?.Deuda_Activa ?? 0) || 0;
-                    if (tipo === 'deuda'){
-                        const added = Number(payload.Monto) || 0;
-                        const newDeuda = parseFloat((current + added).toFixed(2));
-                        let upd = client
-                            .from('Clientes')
-                            .update({ Deuda_Activa: newDeuda })
-                            .eq('Telefono', phoneValue);
-                        upd = applyIdNegocioFilter(upd);
-                        const { error: updError } = await upd;
-                        if (updError){
-                            console.error('Error al actualizar deuda del cliente', updError);
-                            window.Swal.showValidationMessage('Error al actualizar deuda del cliente: ' + (updError.message || updError));
-                            return null;
-                        }
-                    } else if (tipo === 'pago'){
-                        const deducted = Number(payload.Monto) || 0;
-                        const newDeuda = parseFloat(Math.max(0, current - deducted).toFixed(2));
-                        let upd = client
-                            .from('Clientes')
-                            .update({ Deuda_Activa: newDeuda })
-                            .eq('Telefono', phoneValue);
-                        upd = applyIdNegocioFilter(upd);
-                        const { error: updError } = await upd;
-                        if (updError){
-                            console.error('Error al actualizar deuda del cliente', updError);
-                            window.Swal.showValidationMessage('Error al actualizar deuda del cliente: ' + (updError.message || updError));
-                            return null;
-                        }
-                    }
-                }
-                return { ok: true };
-            }catch(err){
-                console.error(err);
-                window.Swal.showValidationMessage('Error al registrar la operación');
-                return null;
-            }
-        },
-        didOpen: () => {
-            // wire up search
-            const input = document.getElementById('clientSearch');
-            const matches = document.getElementById('clientMatches');
-            const amount = document.getElementById('opAmount');
-
-            let debounceTimer = null;
-
-            async function loadMatches(term){
-                matches.innerHTML = '';
-                matches.selectedClient = null;
-                if (!term) return;
-                try{
-                    const orQuery = `Nombre.ilike.%${term}%,Telefono.ilike.%${term}%`;
-                    let q = client
-                        .from('Clientes')
-                        .select('Nombre, Telefono')
-                        .or(orQuery)
-                        .limit(50);
-                    q = applyIdNegocioFilter(q);
-                    const { data, error } = await q;
-                    if (error) { console.error(error); matches.innerHTML = '<div class="muted">Error de búsqueda</div>'; return; }
-                    if (!data || data.length === 0) { matches.innerHTML = '<div class="muted">No hay coincidencias</div>'; return; }
-                    
-                    data.forEach(c => {
-                        const div = document.createElement('div');
-                        div.style.padding = '6px';
-                        div.style.borderBottom = '1px solid rgba(255,255,255,0.03)';
-                        div.style.cursor = 'pointer';
-                        // NOTA: Se asume que la función escapeHtml está definida.
-                        div.innerHTML = `<strong>${escapeHtml(c.Nombre ?? '')} ${escapeHtml(c.Apellido ?? '')}</strong><br><small class="muted">${escapeHtml(c.Telefono ?? '')}</small>`;
-                        div.addEventListener('click', () => {
-                            input.value = `${c.Nombre ?? ''} ${c.Apellido ?? ''}`.trim() || (c.Telefono ?? '');
-                            matches.selectedClient = c; 
-                            matches.innerHTML = '';
-                            input.focus();
-                        });
-                        matches.appendChild(div);
-                    });
-                }catch(err){
-                    console.error('Busqueda clientes error', err);
-                    matches.innerHTML = '<div class="muted">Error de búsqueda</div>';
-                }
-            }
-
-            if (input) {
-                input.addEventListener('input', () => {
-                    clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(() => loadMatches(input.value.trim()), 250);
-                });
-                if (input.value && input.value.trim()) loadMatches(input.value.trim());
-            }
-
-            // --- LÓGICA DE CALCULADORA (Solo + y -) ---
-            const btns = document.querySelectorAll('#calc .calc-btn');
-            const ops = document.querySelectorAll('#calc .calc-op');
-            const eq = document.getElementById('calc-eq');
-            const clear = document.getElementById('calc-clear');
-            const back = document.getElementById('calc-back');
-            
-            let currentDisplay = '0';
-            let firstOperand = null;
-            let operator = null;
-            let waitingForSecondOperand = false;
-
-            function getOperatorSymbol(op) {
-                if (op === '+') return '+';
-                if (op === '-') return '-';
-                if (op === '*') return '×';
-                if (op === '/') return '÷';
-                return '';
-            }
-
-            function updateDisplay(value) {
-                currentDisplay = String(value);
-                if (amount) {
-                    amount.value = currentDisplay;
-                    // Al actualizar la pantalla, limpiamos cualquier placeholder previo
-                    amount.placeholder = '';
-                }
-            }
-
-            function calculate(first, second, op) {
-                first = parseFloat(first);
-                second = parseFloat(second);
-                // Soportar suma, resta y multiplicación
-                if (op === '+') return first + second;
-                if (op === '-') return first - second;
-                if (op === '*') return first * second;
-                if (op === '/') return second === 0 ? first : first / second; // evita división por cero
-
-                return second; // Si no hay operador válido, devuelve el segundo operando.
-            }
-
-            function handleDigit(digit) {
-                if (waitingForSecondOperand) {
-                    currentDisplay = digit;
-                    waitingForSecondOperand = false;
-                } else {
-                    if (currentDisplay === '0') currentDisplay = digit;
-                    else currentDisplay += digit;
-                }
-                updateDisplay(currentDisplay);
-            }
-
-            function handleDecimal() {
-                if (waitingForSecondOperand) {
-                    currentDisplay = '0.';
-                    waitingForSecondOperand = false;
-                    updateDisplay(currentDisplay);
-                    return;
-                }
-                if (!currentDisplay.includes('.')) {
-                    currentDisplay += '.';
-                }
-                updateDisplay(currentDisplay);
-            }
-
-            function handleOperator(nextOperator) {
-                // Permitimos +, - y *
-                if (nextOperator !== '+' && nextOperator !== '-' && nextOperator !== '*' && nextOperator !== '/') return;
-
-                const inputValue = parseFloat(currentDisplay);
-
-
-                // Si ya hay un operador y estamos esperando segundo operando,
-                // simplemente cambiamos el operador y actualizamos la visualización (value).
-                if (operator && waitingForSecondOperand) {
-                    operator = nextOperator;
-                    // mostrar el nuevo símbolo junto al valor actual en el value
-                    if (amount) amount.value = String(currentDisplay) + ' ' + getOperatorSymbol(operator);
-                    return;
-                }
-
-                if (firstOperand === null) {
-                    firstOperand = inputValue;
-                } else if (operator) {
-                    const result = calculate(firstOperand, inputValue, operator);
-                    firstOperand = result;
-                    updateDisplay(firstOperand.toFixed(2));
-                }
-
-                // Mostrar el operador en el campo de monto (junto al número actual) usando value
-                if (amount) amount.value = String(currentDisplay) + ' ' + getOperatorSymbol(nextOperator);
-
-                waitingForSecondOperand = true;
-                operator = nextOperator;
-            }
-
-            function handleEquals() {
-                if (operator === null || waitingForSecondOperand) {
-                    return;
-                }
-                const inputValue = parseFloat(currentDisplay);
-                let secondOperand = inputValue;
-                
-                const result = calculate(firstOperand, secondOperand, operator);
-                
-                // Mostrar resultado en pantalla
-                updateDisplay(result.toFixed(2));
-                // Al finalizar la operación, limpiar el placeholder pues mostramos el resultado
-                if (amount) amount.placeholder = '';
-                firstOperand = result;
-                operator = null;
-                waitingForSecondOperand = true;
-            }
-
-            function clearCalculator() {
-                currentDisplay = '0';
-                firstOperand = null;
-                operator = null;
-                waitingForSecondOperand = false;
-                updateDisplay(currentDisplay);
-                if (amount) amount.placeholder = '';
-            }
-
-            function backspace() {
-                // Si estamos esperando el segundo operando y hay operador, quitamos el operador
-                if (waitingForSecondOperand) {
-                    if (operator) {
-                        operator = null;
-                        waitingForSecondOperand = false;
-                        if (amount) amount.value = String(currentDisplay);
-                        return;
-                    } else {
-                        waitingForSecondOperand = false;
-                    }
-                }
-
-                // Operar sobre el número mostrado
-                if (!currentDisplay || currentDisplay === '0') return;
-                if (currentDisplay.length <= 1 || (currentDisplay.length === 2 && currentDisplay.startsWith('-'))) {
-                    updateDisplay('0');
-                } else {
-                    updateDisplay(currentDisplay.slice(0, -1));
-                }
-            }
-
-            // Event Listeners
-            btns.forEach(b => b.addEventListener('click', () => {
-                const k = b.dataset.key;
-                if (k === '.') {
-                    handleDecimal();
-                } else {
-                    handleDigit(k);
-                }
-            }));
-
-            ops.forEach(o => o.addEventListener('click', () => {
-                handleOperator(o.dataset.op);
-            }));
-
-            if (eq) eq.addEventListener('click', handleEquals);
-            if (clear) clear.addEventListener('click', clearCalculator);
-            if (back) back.addEventListener('click', backspace);
-
-            // Sincronizar el input de monto con la lógica de la calculadora al inicio
-            if (amount.value !== '0') {
-                currentDisplay = amount.value;
-            }
-        }
-    });
-
-    // Si el preConfirm devolvió ok, mostrar toast y recargar UI
-    if (result && result.isConfirmed && result.value && result.value.ok) {
-        showSuccessToast('Operación registrada correctamente');
-        try { await recargarMontos(); } catch(e){}
-        try { await recargarTabla(); } catch(e){}
-    }
-}
-
 async function mostrarOperaciones(tipo){
     const cont = document.getElementById('lista_operaciones');
     if (!cont) return;
@@ -1228,6 +1039,7 @@ async function showOperacionDetalle(item, tipo) {
 
 // ── Drawer detalle operación (Inicio) ──
 let opdInicioEls = null;
+let opdInicioId = 0;
 
 function ensureOperacionDetalleDrawerInicio(){
     if (opdInicioEls) return opdInicioEls;
@@ -1237,6 +1049,7 @@ function ensureOperacionDetalleDrawerInicio(){
         backdrop = document.createElement('div');
         backdrop.id = 'opdBackdrop';
         backdrop.className = 'opd-backdrop';
+        backdrop.style.display = 'none';
         document.body.appendChild(backdrop);
     }
 
@@ -1248,6 +1061,7 @@ function ensureOperacionDetalleDrawerInicio(){
         drawer.setAttribute('role', 'dialog');
         drawer.setAttribute('aria-modal', 'true');
         drawer.setAttribute('aria-label', 'Detalle de operación');
+        drawer.style.display = 'none';
         drawer.innerHTML = `
             <div class="opd-header">
                 <div class="opd-title">
@@ -1286,8 +1100,38 @@ function ensureOperacionDetalleDrawerInicio(){
     return opdInicioEls;
 }
 
+function showOperacionDetalleDrawerInicioElements(){
+    const els = ensureOperacionDetalleDrawerInicio();
+    els.backdrop.style.display = 'block';
+    els.drawer.style.display = 'grid';
+    // Forzar reflow para que arranque la transición.
+    // eslint-disable-next-line no-unused-expressions
+    els.drawer.offsetHeight;
+    return els;
+}
+
+function hideOperacionDetalleDrawerInicioElementsAfterTransition(localId){
+    const els = ensureOperacionDetalleDrawerInicio();
+    const drawer = els.drawer;
+
+    const onEnd = (e) => {
+        if (e.target !== drawer) return;
+        if (e.propertyName !== 'transform') return;
+        drawer.removeEventListener('transitionend', onEnd);
+
+        if (opdInicioId !== localId) return;
+        if (document.body.classList.contains('opd-open')) return;
+
+        els.drawer.style.display = 'none';
+        els.backdrop.style.display = 'none';
+    };
+
+    drawer.addEventListener('transitionend', onEnd);
+}
+
 function closeOperacionDetalleDrawerInicio(){
     document.body.classList.remove('opd-open');
+    hideOperacionDetalleDrawerInicioElementsAfterTransition(opdInicioId);
 }
 
 function buildOpdItem(label, sub, value, valueClass){
@@ -1306,7 +1150,9 @@ function buildOpdItem(label, sub, value, valueClass){
 }
 
 async function openOperacionDetalleDrawerInicio(item, tipo){
-    const els = ensureOperacionDetalleDrawerInicio();
+    opdInicioId++;
+    const localId = opdInicioId;
+    const els = showOperacionDetalleDrawerInicioElements();
     const isDeuda = tipo === 'deudas';
     const formatter = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 
@@ -1355,7 +1201,8 @@ async function openOperacionDetalleDrawerInicio(item, tipo){
     });
 
     if (els.list) els.list.innerHTML = html;
-    document.body.classList.add('opd-open');
+    // Evitar que un cierre anterior oculte si reabrimos rápido.
+    if (opdInicioId === localId) document.body.classList.add('opd-open');
 
     // Reemplazar el placeholder de Cliente
     try{
@@ -1383,7 +1230,7 @@ async function obtenerNombreCliente(telefono) {
     const { data, error } = await q.single();
 
     if (error) {
-        showError('Error al obtener el nombre del cliente:', error);
+        console.error('Error al obtener el nombre del cliente:', error);
         return null;
     }
     return data?.Nombre ?? null;
@@ -1440,57 +1287,55 @@ window.recargarTabla = recargarTabla;
 const __deudaTotalEl = document.getElementById("deuda_total");
 if (__deudaTotalEl){
 __deudaTotalEl.addEventListener("click", async function() {
-    const Swal = await loadSweetAlert2();
-    await Swal.fire({
-        title: 'Desglose de Deuda Total Activa',
-        html: 'Cargando...',
-        didOpen: async () => {
-            let q = client
-                .from('Clientes')
-                .select('Nombre, Telefono, Deuda_Activa')
-                .gt('Deuda_Activa', 0)
-                .order('Deuda_Activa', { ascending: false });
-            q = applyIdNegocioFilter(q);
-            const { data, error } = await q;
-            if (error) {
-                Swal.getHtmlContainer().innerHTML = 'Error al cargar los datos: ' + escapeHtml(error.message);
-                return;
-            }
-            if (!data || data.length === 0) {
-                Swal.getHtmlContainer().innerHTML = 'No hay clientes con deuda activa.';
-                return;
-            }
-            const formatter = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
-            let totalDeuda = 0;
-            let html = '<div id="deuda-breakdown" style="display:grid; gap:8px;">';
-            data.forEach(cliente => {
-                const nombreCompleto = cliente.Nombre || '';
-                const telefono = cliente.Telefono || '';
-                const deuda = Number(cliente.Deuda_Activa) || 0;
-                totalDeuda += deuda;
-                html += `
-                    <div class="op-item" style="border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px;">
-                        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                            <div>
-                                <div style="font-weight:600;">${escapeHtml(nombreCompleto)}</div>
-                                <div class="muted" style="font-size:0.85rem;">${escapeHtml(telefono)}</div>
-                            </div>
-                            <div style="font-weight:700; color:var(--danger)">${formatter.format(deuda)}</div>
-                        </div>
-                    </div>`;
-            });
-            // Total de deuda activa acumulada, bien formateado
-            html += `
-                <div class="op-item" style="border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-                        <div class="muted" style="font-weight:600;">Total Deuda Activa</div>
-                        <div style="font-weight:700; color:var(--danger);">${formatter.format(totalDeuda)}</div>
-                    </div>
-                </div>`;
-            html += '</div>';
-            Swal.getHtmlContainer().innerHTML = html;
+    // Abrir usando el mismo drawer que el detalle de deuda/pago (opd-*)
+    opdInicioId++;
+    const localId = opdInicioId;
+    const els = showOperacionDetalleDrawerInicioElements();
+
+    if (els.title) els.title.textContent = 'Desglose de Deuda Total Activa';
+    if (els.subtitle) els.subtitle.textContent = 'Clientes con saldo pendiente';
+    if (els.list) els.list.innerHTML = '<div class="loading-state">Cargando…</div>';
+    if (opdInicioId === localId) document.body.classList.add('opd-open');
+
+    try{
+        let q = client
+            .from('Clientes')
+            .select('Nombre, Telefono, Deuda_Activa')
+            .gt('Deuda_Activa', 0)
+            .order('Deuda_Activa', { ascending: false });
+        q = applyIdNegocioFilter(q);
+        const { data, error } = await q;
+
+        if (error) {
+            if (els.list) els.list.innerHTML = `<div class="opd-list">${buildOpdItem('Error', '', String(error.message || error), 'opd-value--danger')}</div>`;
+            return;
         }
-    })
+        if (!data || data.length === 0) {
+            if (els.list) els.list.innerHTML = `<div class="opd-list">${buildOpdItem('Sin resultados', '', 'No hay clientes con deuda activa.', '')}</div>`;
+            return;
+        }
+
+        const formatter = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+        let totalDeuda = 0;
+
+        let html = '<h4 class="opd-section-title">Clientes</h4><div class="opd-list">';
+        data.forEach((cliente) => {
+            const nombre = String(cliente?.Nombre ?? '').trim();
+            const tel = String(cliente?.Telefono ?? '').trim();
+            const deuda = Number(cliente?.Deuda_Activa) || 0;
+            totalDeuda += deuda;
+            html += buildOpdItem(nombre || 'Cliente', tel ? `Tel: ${tel}` : '', formatter.format(deuda), 'opd-value--danger');
+        });
+        html += '</div>';
+
+        html += '<h4 class="opd-section-title" style="margin-top:14px;">Total</h4>';
+        html += `<div class="opd-list">${buildOpdItem('Total Deuda Activa', 'Suma de clientes con deuda', formatter.format(totalDeuda), 'opd-value--danger')}</div>`;
+
+        if (els.list) els.list.innerHTML = html;
+    }catch(err){
+        console.error(err);
+        if (els.list) els.list.innerHTML = `<div class="opd-list">${buildOpdItem('Error', '', 'Error al cargar el desglose.', 'opd-value--danger')}</div>`;
+    }
 });
 }
 

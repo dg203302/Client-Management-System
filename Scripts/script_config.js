@@ -1,4 +1,3 @@
-import {showError, showSuccess, showErrorToast, showSuccessToast, showinfo, showInfoHTML, loadSweetAlert2} from './sweetalert2.js'
 import {loadSupaBseWithAuth} from './supabase.js'
 
 // --- Tema (modo oscuro/claro) ---
@@ -33,6 +32,305 @@ applyTheme(getStoredTheme())
 
 const client= await loadSupaBseWithAuth();
 
+function escapeHtml(str){
+    return (str ?? '').toString().replace(/[&<>\"]/g, (ch) => {
+        switch (ch){
+            case '&': return '&amp;'
+            case '<': return '&lt;'
+            case '>': return '&gt;'
+            case '"': return '&quot;'
+            default: return ch
+        }
+    })
+}
+
+// --- UI: sheets (bottom-sheet) + toast (sin SweetAlert) ---
+let cfgSheetState = null;
+let cfgToastState = null;
+
+function ensureCfgToast(){
+    if (cfgToastState?.el) return cfgToastState;
+    const el = document.createElement('div');
+    el.className = 'cfg-toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    cfgToastState = { el, timer: null };
+    return cfgToastState;
+}
+
+function showToast(message, variant = 'info'){
+    const state = ensureCfgToast();
+    if (!state?.el) return;
+    const el = state.el;
+
+    if (state.timer) window.clearTimeout(state.timer);
+    el.classList.remove('is-success', 'is-error', 'is-info');
+    el.classList.add(variant === 'error' ? 'is-error' : variant === 'success' ? 'is-success' : 'is-info');
+    el.textContent = (message || '').toString();
+    el.style.display = 'block';
+    // reflow
+    void el.getBoundingClientRect();
+    el.classList.add('is-open');
+
+    state.timer = window.setTimeout(() => {
+        el.classList.remove('is-open');
+        window.setTimeout(() => {
+            el.style.display = 'none';
+        }, 240);
+    }, 2400);
+}
+
+function ensureCfgSheet(){
+    if (cfgSheetState?.sheet && cfgSheetState?.backdrop) return cfgSheetState;
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'cfg-sheet-backdrop';
+    backdrop.style.display = 'none';
+
+    const sheet = document.createElement('section');
+    sheet.className = 'cfg-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.style.display = 'none';
+
+    sheet.innerHTML = `
+        <div class="cfg-sheet__header">
+            <div>
+                <h2 class="cfg-sheet__title" data-title></h2>
+                <p class="cfg-sheet__subtitle" data-subtitle></p>
+            </div>
+            <button type="button" class="cfg-sheet__close" data-close aria-label="Cerrar" title="Cerrar">×</button>
+        </div>
+        <div class="cfg-sheet__body">
+            <div class="cfg-sheet__spinner" data-spinner aria-hidden="true"></div>
+            <div class="cfg-sheet__message" data-message></div>
+            <div class="cfg-sheet__actions" data-actions>
+                <button type="button" class="cfg-btn cfg-btn--ghost" data-cancel>Cancelar</button>
+                <button type="button" class="cfg-btn cfg-btn--danger" data-confirm>Confirmar</button>
+                <button type="button" class="cfg-btn cfg-btn--primary" data-ok>Aceptar</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(sheet);
+
+    const titleEl = sheet.querySelector('[data-title]');
+    const subtitleEl = sheet.querySelector('[data-subtitle]');
+    const messageEl = sheet.querySelector('[data-message]');
+    const spinnerEl = sheet.querySelector('[data-spinner]');
+    const actionsEl = sheet.querySelector('[data-actions]');
+    const btnCancel = sheet.querySelector('[data-cancel]');
+    const btnConfirm = sheet.querySelector('[data-confirm]');
+    const btnOk = sheet.querySelector('[data-ok]');
+    const btnClose = sheet.querySelector('[data-close]');
+
+    cfgSheetState = {
+        backdrop,
+        sheet,
+        titleEl,
+        subtitleEl,
+        messageEl,
+        spinnerEl,
+        actionsEl,
+        btnCancel,
+        btnConfirm,
+        btnOk,
+        btnClose,
+        sessionSeq: 0,
+        activeSession: 0,
+        transitionSeq: 0,
+        resolve: null,
+        mode: 'message',
+        dismissable: true
+    };
+
+    function requestClose(result){
+        const r = cfgSheetState?.resolve;
+        if (typeof r === 'function'){
+            cfgSheetState.resolve = null;
+            r(result);
+        }
+        closeCfgSheet();
+    }
+
+    backdrop.addEventListener('click', () => {
+        if (!cfgSheetState?.dismissable) return;
+        requestClose(false);
+    });
+    btnClose?.addEventListener('click', () => {
+        if (!cfgSheetState?.dismissable) return;
+        requestClose(false);
+    });
+    btnCancel?.addEventListener('click', () => requestClose(false));
+    btnConfirm?.addEventListener('click', () => requestClose(true));
+    btnOk?.addEventListener('click', () => requestClose(true));
+
+    sheet.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape'){
+            if (!cfgSheetState?.dismissable) return;
+            e.preventDefault();
+            requestClose(false);
+            return;
+        }
+        if (e.key === 'Enter'){
+            e.preventDefault();
+            // Enter confirma en confirm/message; en loading no hace nada
+            if (cfgSheetState?.mode === 'loading') return;
+            if (cfgSheetState?.mode === 'confirm') requestClose(true);
+            else requestClose(true);
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (!document.body.classList.contains('cfg-sheet-open')) return;
+        if (e.key === 'Escape'){
+            if (!cfgSheetState?.dismissable) return;
+            e.preventDefault();
+            requestClose(false);
+        }
+    });
+
+    return cfgSheetState;
+}
+
+function openCfgConfirm({ title, subtitle, messageHtml, confirmText, cancelText } = {}){
+    const state = ensureCfgSheet();
+    if (!state) return Promise.resolve(false);
+
+    state.mode = 'confirm';
+    state.dismissable = true;
+    state.sessionSeq += 1;
+    const sessionId = state.sessionSeq;
+    state.activeSession = sessionId;
+
+    state.sheet.setAttribute('aria-label', (title || 'Confirmación').toString());
+    if (state.titleEl) state.titleEl.textContent = (title || 'Confirmación').toString();
+    if (state.subtitleEl) state.subtitleEl.textContent = (subtitle || '').toString();
+    if (state.messageEl) state.messageEl.innerHTML = (messageHtml || '').toString();
+    if (state.btnConfirm) state.btnConfirm.textContent = (confirmText || 'Confirmar').toString();
+    if (state.btnCancel) state.btnCancel.textContent = (cancelText || 'Cancelar').toString();
+
+    if (state.spinnerEl) state.spinnerEl.style.display = 'none';
+    if (state.btnConfirm) state.btnConfirm.style.display = '';
+    if (state.btnCancel) state.btnCancel.style.display = '';
+    if (state.btnOk) state.btnOk.style.display = 'none';
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'block';
+    void state.sheet.getBoundingClientRect();
+    document.body.classList.add('cfg-sheet-open');
+    requestAnimationFrame(() => state.btnConfirm?.focus());
+
+    return new Promise((resolve) => {
+        state.resolve = (result) => {
+            if (state.activeSession !== sessionId) return;
+            state.activeSession = 0;
+            resolve(!!result);
+        };
+    });
+}
+
+function openCfgMessage({ title, subtitle, messageHtml, okText } = {}){
+    const state = ensureCfgSheet();
+    if (!state) return Promise.resolve(false);
+
+    state.mode = 'message';
+    state.dismissable = true;
+    state.sessionSeq += 1;
+    const sessionId = state.sessionSeq;
+    state.activeSession = sessionId;
+
+    state.sheet.setAttribute('aria-label', (title || 'Mensaje').toString());
+    if (state.titleEl) state.titleEl.textContent = (title || 'Mensaje').toString();
+    if (state.subtitleEl) state.subtitleEl.textContent = (subtitle || '').toString();
+    if (state.messageEl) state.messageEl.innerHTML = (messageHtml || '').toString();
+    if (state.btnOk) state.btnOk.textContent = (okText || 'Aceptar').toString();
+
+    if (state.spinnerEl) state.spinnerEl.style.display = 'none';
+    if (state.btnConfirm) state.btnConfirm.style.display = 'none';
+    if (state.btnCancel) state.btnCancel.style.display = 'none';
+    if (state.btnOk) state.btnOk.style.display = '';
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'block';
+    void state.sheet.getBoundingClientRect();
+    document.body.classList.add('cfg-sheet-open');
+    requestAnimationFrame(() => state.btnOk?.focus());
+
+    return new Promise((resolve) => {
+        state.resolve = () => {
+            if (state.activeSession !== sessionId) return;
+            state.activeSession = 0;
+            resolve(true);
+        };
+    });
+}
+
+function openCfgLoading({ title, subtitle, messageHtml } = {}){
+    const state = ensureCfgSheet();
+    if (!state) return;
+
+    state.mode = 'loading';
+    state.dismissable = false;
+    state.sessionSeq += 1;
+    state.activeSession = state.sessionSeq;
+
+    state.sheet.setAttribute('aria-label', (title || 'Cargando').toString());
+    if (state.titleEl) state.titleEl.textContent = (title || 'Cargando…').toString();
+    if (state.subtitleEl) state.subtitleEl.textContent = (subtitle || '').toString();
+    if (state.messageEl) state.messageEl.innerHTML = (messageHtml || '').toString();
+
+    if (state.spinnerEl) state.spinnerEl.style.display = 'inline-block';
+    if (state.btnConfirm) state.btnConfirm.style.display = 'none';
+    if (state.btnCancel) state.btnCancel.style.display = 'none';
+    if (state.btnOk) state.btnOk.style.display = 'none';
+
+    state.backdrop.style.display = 'block';
+    state.sheet.style.display = 'block';
+    void state.sheet.getBoundingClientRect();
+    document.body.classList.add('cfg-sheet-open');
+}
+
+function closeCfgSheet(){
+    const state = cfgSheetState;
+    if (!state?.sheet || !state?.backdrop) return;
+
+    const sheet = state.sheet;
+    const backdrop = state.backdrop;
+    state.transitionSeq += 1;
+    const closeId = state.transitionSeq;
+
+    document.body.classList.remove('cfg-sheet-open');
+
+    const finalize = () => {
+        if (!cfgSheetState || cfgSheetState.transitionSeq !== closeId) return;
+        sheet.style.display = 'none';
+        backdrop.style.display = 'none';
+        state.dismissable = true;
+    };
+
+    let done = false;
+    const onEnd = (e) => {
+        if (done) return;
+        if (e.target !== sheet) return;
+        if (e.propertyName && e.propertyName !== 'transform' && e.propertyName !== 'opacity') return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    };
+
+    sheet.addEventListener('transitionend', onEnd);
+    window.setTimeout(() => {
+        if (done) return;
+        done = true;
+        sheet.removeEventListener('transitionend', onEnd);
+        finalize();
+    }, 420);
+}
+
 async function getCurrentUserId(){
     const fromStorage = (localStorage.getItem('UserID') || '').toString().trim()
     if (fromStorage && fromStorage !== 'N/A') return fromStorage
@@ -49,48 +347,58 @@ async function getCurrentUserId(){
 async function eliminarCuenta(){
     const userId = await getCurrentUserId()
     if (!userId){
-        await showErrorToast('No se encontró un usuario autenticado.')
+        showToast('No se encontró un usuario autenticado.', 'error')
         return
     }
 
-    const Swal = await loadSweetAlert2()
-    const result = await Swal.fire({
+    const ok = await openCfgConfirm({
         title: 'Eliminar cuenta',
-        text: 'Esta acción es irreversible. ¿Querés continuar?',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonText: 'Eliminar',
-        cancelButtonText: 'Cancelar',
-        reverseButtons: true
+        subtitle: 'Esta acción es irreversible.',
+        messageHtml: '¿Querés continuar con la eliminación permanente de tu cuenta?',
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar'
     })
 
-    if (!result.isConfirmed) return
+    if (!ok) return
 
-    Swal.fire({
+    openCfgLoading({
         title: 'Eliminando…',
-        text: 'Por favor espera',
-        allowOutsideClick: false,
-        allowEscapeKey: false,
-        didOpen: () => Swal.showLoading()
+        subtitle: 'Por favor espera',
+        messageHtml: 'Estamos eliminando tu cuenta y cerrando sesión.'
     })
 
     try{
         // Función dedicada de Supabase (requiere service_role)
         const { error } = await client.auth.admin.deleteUser(userId)
         if (error){
-            Swal.close()
-            await showError('Error al eliminar la cuenta', error.message || String(error))
+            closeCfgSheet()
+            await openCfgMessage({
+                title: 'Error al eliminar la cuenta',
+                subtitle: 'No se pudo completar la operación.',
+                messageHtml: escapeHtml(error.message || String(error)),
+                okText: 'Aceptar'
+            })
             return
         }
 
         try { await client.auth.signOut() } catch { /* ignore */ }
         localStorage.clear()
-        Swal.close()
-        await showSuccess('Cuenta eliminada', 'Tu cuenta fue eliminada correctamente.')
+        closeCfgSheet()
+        await openCfgMessage({
+            title: 'Cuenta eliminada',
+            subtitle: 'Operación completada.',
+            messageHtml: 'Tu cuenta fue eliminada correctamente.',
+            okText: 'Continuar'
+        })
         window.location.href = '/index.html'
     }catch(e){
-        Swal.close()
-        await showError('Error al eliminar la cuenta', e?.message || String(e))
+        closeCfgSheet()
+        await openCfgMessage({
+            title: 'Error al eliminar la cuenta',
+            subtitle: 'Ocurrió un problema inesperado.',
+            messageHtml: escapeHtml(e?.message || String(e)),
+            okText: 'Aceptar'
+        })
     }
 }
 
@@ -120,7 +428,11 @@ window.cerrarSesion=function() {
 const idiomaBtn = document.getElementById('idioma-btn')
 if (idiomaBtn){
     idiomaBtn.addEventListener('click', async () => {
-        await showinfo('Próximamente')
+        await openCfgMessage({
+            title: 'Próximamente',
+            messageHtml: 'Esta opción estará disponible en una próxima actualización.',
+            okText: 'Aceptar'
+        })
     })
 }
 
@@ -128,14 +440,18 @@ const modoOscuroBtn = document.getElementById('modo-oscuro-btn')
 if (modoOscuroBtn){
     modoOscuroBtn.addEventListener('click', async () => {
         const next = toggleTheme()
-        await showSuccessToast(next === 'dark' ? 'Modo oscuro activado' : 'Modo claro activado')
+        showToast(next === 'dark' ? 'Modo oscuro activado' : 'Modo claro activado', 'success')
     })
 }
 
 const transparenciaBtn = document.getElementById('transparencia-btn')
 if (transparenciaBtn){
     transparenciaBtn.addEventListener('click', async () => {
-        await showinfo('Próximamente')
+        await openCfgMessage({
+            title: 'Próximamente',
+            messageHtml: 'Esta opción estará disponible en una próxima actualización.',
+            okText: 'Aceptar'
+        })
     })
 }
 
