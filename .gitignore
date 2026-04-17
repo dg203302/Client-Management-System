@@ -1,4 +1,3 @@
 # Local Netlify folder
 .netlify
 /Plantillas/plantillas_heredas/
-/edge-functions/
