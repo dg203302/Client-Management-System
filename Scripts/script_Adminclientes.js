@@ -995,16 +995,35 @@ async function agregarCliente(){
             await showErrorToast('No se encontró el ID de usuario (UserID). Iniciá sesión nuevamente.');
             return;
         }
-        const { data, error } = await supabase
-            .from('Clientes')
-            .insert([
-                { Nombre: formValues.nombre, Telefono: formValues.telefono, ID_Negocio: idNegocio }
-            ]);
-        if (error) {
-            await showErrorToast('Error al agregar el cliente: ' + error.message);
-        } else {
+        try {
+            const payload = {
+                action: 'agregarCliente',
+                nombre: formValues.nombre,
+                telefono: formValues.telefono,
+                userId: getLocalUserId()
+            };
+
+            const resp = await fetch('/api/adminclientes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const resJson = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                await showErrorToast('Error al agregar el cliente: ' + (resJson?.error || resp.statusText));
+                return;
+            }
+            if (resJson?.error) {
+                await showErrorToast('Error al agregar el cliente: ' + resJson.error);
+                return;
+            }
+
             await showSuccessToast('Cliente agregado exitosamente');
             await verTodosClientes();
+        } catch (err) {
+            console.error('agregarCliente error', err);
+            await showErrorToast('Error al agregar el cliente');
         }
     }
 }
