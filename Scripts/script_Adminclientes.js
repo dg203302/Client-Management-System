@@ -1584,6 +1584,12 @@ async function confirmarYEliminarOperacionDesdeDrawer(){
 
     if (tipo === 'deudas' && shouldAdjustDeuda){
         await ajustarDeudaActivaCliente(currentClienteTelefono, -monto);
+        // Recargar la interfaz de clientes para reflejar la nueva Deuda_Activa
+        try{
+            window.location.reload();
+        }catch(e){
+            console.warn('No se pudo recargar la lista de clientes:', e);
+        }
     }
 
     // refrescar panel
