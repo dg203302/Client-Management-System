@@ -47,6 +47,11 @@
                 <div class="stats-status" id="stats_status">Cargando datos...</div>
             </div>
 
+            <nav class="month-filter" id="month_filter" aria-label="Filtro por mes">
+                <button class="month-pill active" data-month="all" type="button">Todos</button>
+                <!-- JS inserta los meses disponibles aquí -->
+            </nav>
+
             <div class="stats-metrics" id="stats_metrics">
                 <article class="stats-metric-card">
                     <span class="stats-metric-card__label">Usuarios</span>
@@ -61,9 +66,11 @@
                     <strong class="stats-metric-card__value" id="stats_total_pagos">$0</strong>
                 </article>
             </div>
+        </section>
 
-            <div class="stats-grid">
-                <article class="chart-card glass-panel">
+        <div class="stats-charts-row">
+            <article class="glass-panel stats-charts-trends">
+                <div class="chart-card">
                     <div class="chart-card__head">
                         <div>
                             <p class="kpi-label">Tendencia</p>
@@ -74,9 +81,9 @@
                     <div class="chart-wrap">
                         <canvas id="chart_deudas_tiempo" aria-label="Gráfico de evolución de deudas" role="img"></canvas>
                     </div>
-                </article>
+                </div>
 
-                <article class="chart-card glass-panel">
+                <div class="chart-card">
                     <div class="chart-card__head">
                         <div>
                             <p class="kpi-label">Tendencia</p>
@@ -87,9 +94,11 @@
                     <div class="chart-wrap">
                         <canvas id="chart_pagos_tiempo" aria-label="Gráfico de evolución de pagos" role="img"></canvas>
                     </div>
-                </article>
+                </div>
+            </article>
 
-                <article class="chart-card chart-card--wide glass-panel">
+            <article class="glass-panel stats-charts-distribution">
+                <div class="chart-card">
                     <div class="chart-card__head">
                         <div>
                             <p class="kpi-label">Distribución</p>
@@ -100,9 +109,9 @@
                     <div class="chart-wrap chart-wrap--bars">
                         <canvas id="chart_deuda_por_usuario" aria-label="Gráfico de barras de deuda por usuario" role="img"></canvas>
                     </div>
-                </article>
-            </div>
-        </section>
+                </div>
+            </article>
+        </div>
     </main>
 
     <footer class="bottom-nav" aria-label="Navegación">

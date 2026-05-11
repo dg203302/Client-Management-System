@@ -3,6 +3,12 @@ import { loadSupabase } from './supabase.js';
 let supabaseClient = null;
 let charts = [];
 
+/* ── Cached raw data ── */
+let rawClientes = [];
+let rawDeudas = [];
+let rawPagos = [];
+let selectedMonth = 'all'; // 'all' | 'YYYY-MM'
+
 function getLocalUserId() {
 	const raw = localStorage.getItem('UserID');
 	if (raw === undefined || raw === null) return null;
@@ -36,6 +42,10 @@ function formatLongDate(value) {
 	const date = normalizeDateValue(value);
 	if (!date) return 'Sin fecha';
 	return date.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatDayLabel(date) {
+	return date.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
 }
 
 async function fetchAllClientes() {
@@ -89,12 +99,27 @@ function getClienteNombre(cliente) {
 	return String(cliente?.Nombre ?? cliente?.nombre ?? cliente?.Cliente ?? cliente?.client ?? cliente?.Telefono ?? cliente?.telefono ?? 'Sin nombre').trim();
 }
 
+function getClienteTelefono(cliente) {
+	return String(cliente?.Telefono ?? cliente?.telefono ?? '').trim();
+}
+
+function getRecordTelefono(record) {
+	return String(record?.Telefono_cliente ?? record?.telefono_cliente ?? '').trim();
+}
+
+function getMonthKey(date) {
+	if (!date) return null;
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/* ── Grouping helpers ── */
+
 function groupByMonth(records) {
 	const buckets = new Map();
 	for (const record of records) {
 		const date = normalizeFecha(record);
 		if (!date) continue;
-		const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+		const key = getMonthKey(date);
 		const label = formatMonthLabel(date);
 		const current = buckets.get(key) || { label, total: 0, date };
 		current.total += normalizeMonto(record);
@@ -106,14 +131,160 @@ function groupByMonth(records) {
 		.map(([, entry]) => entry);
 }
 
-function buildDebtPerUserSeries(clientes) {
-	return (clientes || [])
-		.map((cliente) => ({
-			label: getClienteNombre(cliente),
-			value: Number(cliente?.Deuda_Activa ?? cliente?.deuda_activa ?? cliente?.deudaActiva ?? 0) || 0,
+function groupByDay(records) {
+	const buckets = new Map();
+	for (const record of records) {
+		const date = normalizeFecha(record);
+		if (!date) continue;
+		const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+		const label = formatDayLabel(date);
+		const current = buckets.get(key) || { label, total: 0, date };
+		current.total += normalizeMonto(record);
+		current.date = date;
+		buckets.set(key, current);
+	}
+	return Array.from(buckets.entries())
+		.sort((a, b) => a[0].localeCompare(b[0]))
+		.map(([, entry]) => entry);
+}
+
+/* ── Filter helpers ── */
+
+function filterByMonth(records, monthKey) {
+	if (monthKey === 'all') return records;
+	return records.filter((record) => {
+		const date = normalizeFecha(record);
+		return date && getMonthKey(date) === monthKey;
+	});
+}
+
+function getUniqueClientPhones(deudas, pagos) {
+	const phones = new Set();
+	for (const d of deudas) {
+		const tel = getRecordTelefono(d);
+		if (tel) phones.add(tel);
+	}
+	for (const p of pagos) {
+		const tel = getRecordTelefono(p);
+		if (tel) phones.add(tel);
+	}
+	return phones;
+}
+
+/* ── Debt per user for a given set of records ── */
+
+function buildDebtPerUserSeries(clientes, filteredDeudas, filteredPagos, isFiltered) {
+	if (!isFiltered) {
+		// Global: use Deuda_Activa from Clientes (current snapshot)
+		return (clientes || [])
+			.map((cliente) => ({
+				label: getClienteNombre(cliente),
+				value: Number(cliente?.Deuda_Activa ?? cliente?.deuda_activa ?? cliente?.deudaActiva ?? 0) || 0,
+			}))
+			.sort((a, b) => b.value - a.value);
+	}
+
+	// Filtered: sum deudas per client in the filtered period
+	const deudaPorCliente = new Map();
+	for (const d of filteredDeudas) {
+		const tel = getRecordTelefono(d);
+		if (!tel) continue;
+		deudaPorCliente.set(tel, (deudaPorCliente.get(tel) || 0) + normalizeMonto(d));
+	}
+	// Also add pagos as negative? No — keep it simple, show deudas only per user
+	// Map phone → nombre from clientes
+	const phoneToName = new Map();
+	for (const c of clientes) {
+		const tel = getClienteTelefono(c);
+		if (tel) phoneToName.set(tel, getClienteNombre(c));
+	}
+
+	return Array.from(deudaPorCliente.entries())
+		.map(([tel, total]) => ({
+			label: phoneToName.get(tel) || tel,
+			value: total,
 		}))
 		.sort((a, b) => b.value - a.value);
 }
+
+/* ── Available months from data ── */
+
+function extractAvailableMonths(deudas, pagos) {
+	const monthMap = new Map();
+	const allRecords = [...deudas, ...pagos];
+	for (const record of allRecords) {
+		const date = normalizeFecha(record);
+		if (!date) continue;
+		const key = getMonthKey(date);
+		if (!monthMap.has(key)) {
+			monthMap.set(key, {
+				key,
+				label: date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
+				date,
+			});
+		}
+	}
+	return Array.from(monthMap.values()).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/* ── Month filter UI ── */
+
+function renderMonthFilter(months) {
+	const container = document.getElementById('month_filter');
+	if (!container) return;
+
+	// Keep "Todos" pill, remove dynamic pills
+	const existing = container.querySelectorAll('.month-pill[data-month]:not([data-month="all"])');
+	existing.forEach((el) => el.remove());
+
+	for (const month of months) {
+		const pill = document.createElement('button');
+		pill.type = 'button';
+		pill.className = 'month-pill';
+		pill.dataset.month = month.key;
+		pill.textContent = month.label;
+		if (month.key === selectedMonth) pill.classList.add('active');
+		container.appendChild(pill);
+	}
+
+	// Mark "Todos" active if needed
+	const allPill = container.querySelector('[data-month="all"]');
+	if (allPill) {
+		allPill.classList.toggle('active', selectedMonth === 'all');
+	}
+
+	// Scroll active pill into view
+	requestAnimationFrame(() => {
+		const active = container.querySelector('.month-pill.active');
+		if (active) {
+			active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+		}
+	});
+}
+
+function setupMonthFilterListeners() {
+	const container = document.getElementById('month_filter');
+	if (!container) return;
+
+	container.addEventListener('click', (e) => {
+		const pill = e.target.closest('.month-pill');
+		if (!pill) return;
+
+		const month = pill.dataset.month;
+		if (month === selectedMonth) return; // already active
+
+		selectedMonth = month;
+
+		// Update active state
+		container.querySelectorAll('.month-pill').forEach((p) => p.classList.remove('active'));
+		pill.classList.add('active');
+
+		// Re-render with filter
+		renderWithFilter();
+	});
+}
+
+/* ── Chart infrastructure ── */
 
 function destroyCharts() {
 	for (const chart of charts) {
@@ -277,35 +448,74 @@ function createGradient(canvas, startColor, endColor) {
 	return gradient;
 }
 
-async function renderStatistics() {
-	setStatus('Cargando datos...');
-	destroyCharts();
+/* ── Render with current filter ── */
 
-	const [clientes, deudas, pagos] = await Promise.all([
-		fetchAllClientes(),
-		fetchAllDeudas(),
-		fetchAllPagos(),
-	]);
+function renderWithFilter() {
+	const isFiltered = selectedMonth !== 'all';
+	const filteredDeudas = filterByMonth(rawDeudas, selectedMonth);
+	const filteredPagos = filterByMonth(rawPagos, selectedMonth);
 
-	const totalDeuda = clientes.reduce((acc, cliente) => acc + (Number(cliente?.Deuda_Activa ?? cliente?.deuda_activa ?? cliente?.deudaActiva ?? 0) || 0), 0);
-	const totalPagos = pagos.reduce((acc, pago) => acc + normalizeMonto(pago), 0);
+	// KPIs
+	let totalDeuda, totalPagos, userCount;
 
-	setMetric('stats_total_usuarios', String(clientes.length));
+	if (isFiltered) {
+		totalDeuda = filteredDeudas.reduce((acc, d) => acc + normalizeMonto(d), 0);
+		totalPagos = filteredPagos.reduce((acc, p) => acc + normalizeMonto(p), 0);
+		// Active clients for the month
+		const activePhones = getUniqueClientPhones(filteredDeudas, filteredPagos);
+		userCount = activePhones.size;
+	} else {
+		totalDeuda = rawClientes.reduce((acc, cliente) => acc + (Number(cliente?.Deuda_Activa ?? cliente?.deuda_activa ?? cliente?.deudaActiva ?? 0) || 0), 0);
+		totalPagos = rawPagos.reduce((acc, pago) => acc + normalizeMonto(pago), 0);
+		userCount = rawClientes.length;
+	}
+
+	setMetric('stats_total_usuarios', String(userCount));
 	setMetric('stats_total_deuda', formatCurrency(totalDeuda));
 	setMetric('stats_total_pagos', formatCurrency(totalPagos));
-	setStatus('Datos cargados correctamente', 'success');
 
-	const deudasMensuales = groupByMonth(deudas);
-	const pagosMensuales = groupByMonth(pagos);
-	const deudaPorUsuario = buildDebtPerUserSeries(clientes);
+	// Update subtitle based on filter
+	const titleEl = document.querySelector('.stats-report__title');
+	if (titleEl) {
+		if (isFiltered) {
+			const months = extractAvailableMonths(rawDeudas, rawPagos);
+			const monthData = months.find((m) => m.key === selectedMonth);
+			titleEl.textContent = monthData ? monthData.label : selectedMonth;
+		} else {
+			titleEl.textContent = 'Resumen global de clientes';
+		}
+	}
+
+	if (isFiltered && filteredDeudas.length === 0 && filteredPagos.length === 0) {
+		setStatus('Sin actividad en este mes', 'warning');
+	} else {
+		setStatus('Datos cargados correctamente', 'success');
+	}
+
+	// Charts
+	destroyCharts();
+
+	// Line charts: monthly view → show all months; filtered → show daily breakdown
+	let deudasSeries, pagosSeries;
+
+	if (isFiltered) {
+		deudasSeries = groupByDay(filteredDeudas);
+		pagosSeries = groupByDay(filteredPagos);
+	} else {
+		deudasSeries = groupByMonth(rawDeudas);
+		pagosSeries = groupByMonth(rawPagos);
+	}
+
+	const deudaPorUsuario = buildDebtPerUserSeries(rawClientes, filteredDeudas, filteredPagos, isFiltered);
 
 	const deudasCanvas = document.getElementById('chart_deudas_tiempo');
 	const pagosCanvas = document.getElementById('chart_pagos_tiempo');
+
 	if (deudasCanvas) {
 		const gradient = createGradient(deudasCanvas, 'rgba(244, 63, 94, 0.46)', 'rgba(244, 63, 94, 0.05)');
 		buildChart('chart_deudas_tiempo', buildLineConfig(
-			deudasMensuales.map((item) => item.label),
-			deudasMensuales.map((item) => item.total),
+			deudasSeries.map((item) => item.label),
+			deudasSeries.map((item) => item.total),
 			'rgba(244, 63, 94, 0.92)',
 			gradient,
 			'rgba(244, 63, 94, 1)'
@@ -315,8 +525,8 @@ async function renderStatistics() {
 	if (pagosCanvas) {
 		const gradient = createGradient(pagosCanvas, 'rgba(16, 185, 129, 0.45)', 'rgba(16, 185, 129, 0.05)');
 		buildChart('chart_pagos_tiempo', buildLineConfig(
-			pagosMensuales.map((item) => item.label),
-			pagosMensuales.map((item) => item.total),
+			pagosSeries.map((item) => item.label),
+			pagosSeries.map((item) => item.total),
 			'rgba(16, 185, 129, 0.92)',
 			gradient,
 			'rgba(16, 185, 129, 1)'
@@ -331,6 +541,43 @@ async function renderStatistics() {
 		));
 	}
 
+	// Update chart card subtitles based on filter
+	const badges = document.querySelectorAll('.chart-card__badge');
+	if (badges.length >= 1) badges[0].textContent = isFiltered ? 'Mes seleccionado' : 'Todos los usuarios';
+	if (badges.length >= 2) badges[1].textContent = isFiltered ? 'Mes seleccionado' : 'Todos los usuarios';
+	if (badges.length >= 3) badges[2].textContent = isFiltered ? 'Mes seleccionado' : 'Ordenado de mayor a menor';
+
+	// Update chart card h3 titles based on filter
+	const chartTitles = document.querySelectorAll('.chart-card__head h3');
+	if (chartTitles.length >= 1) chartTitles[0].textContent = isFiltered ? 'Deudas registradas día a día' : 'Evolución de deudas a lo largo del tiempo';
+	if (chartTitles.length >= 2) chartTitles[1].textContent = isFiltered ? 'Pagos registrados día a día' : 'Evolución de pagos a lo largo del tiempo';
+	if (chartTitles.length >= 3) chartTitles[2].textContent = isFiltered ? 'Deuda registrada por usuario' : 'Deuda total por usuario';
+}
+
+/* ── Main data load ── */
+
+async function renderStatistics() {
+	setStatus('Cargando datos...');
+	destroyCharts();
+
+	const [clientes, deudas, pagos] = await Promise.all([
+		fetchAllClientes(),
+		fetchAllDeudas(),
+		fetchAllPagos(),
+	]);
+
+	// Cache raw data
+	rawClientes = clientes;
+	rawDeudas = deudas;
+	rawPagos = pagos;
+
+	// Build & render month filter
+	const availableMonths = extractAvailableMonths(deudas, pagos);
+	renderMonthFilter(availableMonths);
+
+	// Render with current filter (defaults to 'all')
+	renderWithFilter();
+
 	if (clientes.length === 0) {
 		setStatus('No hay usuarios para mostrar', 'warning');
 	}
@@ -340,6 +587,7 @@ async function init() {
 	try {
 		supabaseClient = await loadSupabase();
 		await loadChartLibrary();
+		setupMonthFilterListeners();
 		await renderStatistics();
 	} catch (error) {
 		console.error(error);
